@@ -26,8 +26,27 @@ export function resetSessionId(): string {
   return id;
 }
 
+/**
+ * The page this app is actually being viewed under: the parent's origin when
+ * embedded in an iframe, its own otherwise. The server matches it against an
+ * allowlist to decide whether contact details may be shared.
+ */
+function embedOrigin(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    const ancestors = window.location.ancestorOrigins;
+    if (ancestors?.length) return ancestors[0];
+    if (window.parent !== window && document.referrer) {
+      return new URL(document.referrer).origin;
+    }
+  } catch {
+    /* cross-origin access denied — fall through to our own origin */
+  }
+  return window.location.origin;
+}
+
 function sessionHeaders(sessionId: string): HeadersInit {
-  return { 'x-session-id': sessionId };
+  return { 'x-session-id': sessionId, 'x-embed-origin': embedOrigin() };
 }
 
 async function unwrap<T>(response: Response): Promise<T> {

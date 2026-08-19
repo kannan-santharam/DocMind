@@ -545,6 +545,30 @@ no-op and the app is unchanged, and no tracing call is allowed to throw into a r
 path. Observability that can take the product down when the observability vendor has a
 bad day is a liability rather than an asset.
 
+## How are direct contact details handled?
+
+The preloaded profile contains a phone number and an email address. Those are shared
+when the app is reached through the portfolio, and withheld when it is reached at its
+own URL, where it is a public chatbot that anyone or anything can talk to.
+
+The mechanism matters more than the policy. The obvious implementation is a line in the
+system instruction saying not to reveal the number — and that is close to useless,
+because the passage containing the number still enters the model's context, one
+well-phrased question away from coming back out. Instead the passage is rewritten before
+it reaches the model **and** before it reaches the citation panel, so there is nothing to
+extract. Asked to "quote the document exactly", the model quotes the placeholder,
+because the placeholder is all it was given.
+
+Trust is decided server-side from the origin the page is running under — its own, or the
+parent's when embedded in an iframe — matched against an allowlist in an environment
+variable. An unset variable withholds everywhere, so losing the configuration fails
+closed rather than open.
+
+This is a disclosure preference, not a security control, and it is worth being honest
+about which: the origin comes from the browser and could be forged, and the same details
+are published on the portfolio regardless. What it prevents is casual scraping of a
+public endpoint, which is the threat that actually exists.
+
 ## What are the honest limitations of this system?
 
 **No image or diagram understanding.** Text only. Charts, screenshots and diagrams in a
