@@ -130,6 +130,8 @@ pnpm seed https://your-app.vercel.app   # or against the deployment
 
 ## Running locally
 
+Requires Node 20+ and pnpm 9 or newer.
+
 ```bash
 pnpm install
 cp .env.example .env.local     # fill in the three required values
