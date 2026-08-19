@@ -18,7 +18,7 @@ import type { UploadState } from '@/hooks/useDocuments';
 import type { DocumentRecord } from '@/lib/types';
 
 const PORTFOLIO_URL = 'https://kannan-ai-dev.vercel.app';
-const REPO_URL = 'https://github.com/kannan-santharam';
+const REPO_URL = 'https://github.com/kannan-santharam/DocMind';
 
 const KIND_LABEL: Record<string, string> = {
   pdf: 'PDF',
