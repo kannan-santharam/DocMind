@@ -4,8 +4,7 @@ Upload a PDF, DOCX, Markdown file or paste text, then ask questions about it. A
 tool-calling Gemini agent decides **when** to retrieve, rewrites its own query when
 results come back thin, and cites the exact passage behind every claim.
 
-Built by [Kannan Appiya Santharam](https://kannan-ai-dev.vercel.app) ·
-[LinkedIn](https://linkedin.com/in/askannan)
+Built by [Kannan Appiya Santharam](https://linkedin.com/in/askannan)
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-000?logo=nextdotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)
