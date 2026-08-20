@@ -57,10 +57,16 @@ async function unwrap<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
-export async function fetchDocuments(sessionId: string): Promise<DocumentRecord[]> {
+export interface DocumentList {
+  documents: DocumentRecord[];
+  /** True when this origin is trusted, so the preloaded documents are in scope. */
+  trusted: boolean;
+}
+
+export async function fetchDocuments(sessionId: string): Promise<DocumentList> {
   const response = await fetch('/api/documents', { headers: sessionHeaders(sessionId) });
-  const { documents } = await unwrap<{ documents: DocumentRecord[] }>(response);
-  return documents;
+  const { documents, trusted } = await unwrap<DocumentList>(response);
+  return { documents, trusted: Boolean(trusted) };
 }
 
 export async function deleteDocument(sessionId: string, id?: string): Promise<void> {

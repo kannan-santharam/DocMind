@@ -39,6 +39,7 @@ export function Sidebar({
   onNewSession,
   onDismissError,
   onDismissNotices,
+  trusted,
   onClose,
 }: {
   documents: DocumentRecord[];
@@ -51,6 +52,7 @@ export function Sidebar({
   onDismissError: () => void;
   notices?: string[];
   onDismissNotices?: () => void;
+  trusted?: boolean;
   onClose?: () => void;
 }) {
   const totalPassages = documents.reduce((sum, doc) => sum + doc.chunk_count, 0);
@@ -65,7 +67,7 @@ export function Sidebar({
         <div className="min-w-0 flex-1">
           <h1 className="text-brand-gradient text-sm font-extrabold">DocMind</h1>
           <p className="truncate text-[0.65rem] text-[var(--text-muted)]">
-            Ask about Kannan Santharam
+            {trusted ? 'Ask about Kannan Santharam' : 'Agentic RAG · Gemini + pgvector'}
           </p>
         </div>
         {onClose && (

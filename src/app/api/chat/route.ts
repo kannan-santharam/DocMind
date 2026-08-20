@@ -3,7 +3,7 @@ import { runAgent } from '@/lib/agent';
 import type { GeminiContent } from '@/lib/gemini';
 import { resolveModels } from '@/lib/models';
 import { checkRateLimit, LIMITS } from '@/lib/rateLimit';
-import { isTrustedContext } from '@/lib/privacy';
+import { isTrustedOrigin } from '@/lib/privacy';
 import { normaliseSettings } from '@/lib/settings';
 import { requireSessionId, SessionError } from '@/lib/session';
 import { startTrace } from '@/lib/tracing';
@@ -42,8 +42,9 @@ export async function POST(req: NextRequest) {
   const settings = normaliseSettings(body?.settings);
   const models = resolveModels(settings.model);
 
-  // Decided from the request, never from anything the page can set after load.
-  const allowContactDetails = isTrustedContext(req);
+  // Decided from the request. Gates the preloaded documents and the contact
+  // details inside them.
+  const trusted = isTrustedOrigin(req);
 
   if (!messages.length || messages[messages.length - 1]?.role !== 'user') {
     return NextResponse.json(
@@ -93,7 +94,7 @@ export async function POST(req: NextRequest) {
       threshold: settings.threshold,
       maxTurns: settings.maxTurns,
       historyTurns: history.length,
-      contactDetails: allowContactDetails ? 'shared' : 'withheld',
+      origin: trusted ? 'portfolio' : 'direct',
     },
   });
 
@@ -118,7 +119,7 @@ export async function POST(req: NextRequest) {
           settings,
           models,
           trace,
-          allowContactDetails,
+          trusted,
         });
         emit({ type: 'done' });
       } catch (error) {

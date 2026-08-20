@@ -136,6 +136,7 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
           error={docs.error}
           notices={docs.notices}
           onDismissNotices={docs.dismissNotices}
+          trusted={docs.trusted}
           onFile={(file) => void docs.ingest(file)}
           onText={(text, title) => void docs.ingest({ text, title })}
           onDelete={(id) => void docs.remove(id)}
@@ -160,6 +161,7 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
               error={docs.error}
               notices={docs.notices}
               onDismissNotices={docs.dismissNotices}
+              trusted={docs.trusted}
               onFile={(file) => void docs.ingest(file)}
               onText={(text, title) => void docs.ingest({ text, title })}
               onDelete={(id) => void docs.remove(id)}
@@ -186,7 +188,7 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
             <p className="truncate text-xs font-bold text-[var(--text-title)]">
               {docs.documents.length === 0
                 ? 'No documents indexed'
-                : ownedDocuments.length === 0
+                : ownedDocuments.length === 0 && docs.trusted
                   ? 'Kannan Santharam — profile, skills & this project'
                   : `${docs.documents.length} documents indexed`}
             </p>
@@ -234,7 +236,7 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
           placeholder={
             docs.documents.length === 0
               ? 'Upload a document first, then ask about it…'
-              : ownedDocuments.length > 0
+              : ownedDocuments.length > 0 || !docs.trusted
                 ? 'Ask about your documents…'
                 : "Ask about Kannan's experience, or upload a job description…"
           }

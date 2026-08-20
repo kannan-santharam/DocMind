@@ -1,5 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { readableSessions, requireSessionId, SEED_SESSION_ID, SessionError } from '@/lib/session';
+import { isTrustedOrigin } from '@/lib/privacy';
+import {
+  canWriteSharedNamespace,
+  readableSessions,
+  requireSessionId,
+  SEED_SESSION_ID,
+  SessionError,
+} from '@/lib/session';
 import { supabase } from '@/lib/supabase';
 
 export const runtime = 'nodejs';
@@ -7,12 +14,14 @@ export const runtime = 'nodejs';
 export async function GET(req: NextRequest) {
   try {
     const sessionId = requireSessionId(req);
+    const trusted = isTrustedOrigin(req);
+
     const { data, error } = await supabase()
       .from('documents')
       .select(
         'id, filename, mime, source_kind, page_count, char_count, chunk_count, outline, created_at, session_id',
       )
-      .in('session_id', readableSessions(sessionId))
+      .in('session_id', readableSessions(sessionId, trusted))
       .order('created_at', { ascending: false });
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -22,7 +31,7 @@ export async function GET(req: NextRequest) {
       .map(({ session_id, ...doc }) => ({ ...doc, is_public: session_id === SEED_SESSION_ID }))
       .sort((first, second) => Number(first.is_public) - Number(second.is_public));
 
-    return NextResponse.json({ documents });
+    return NextResponse.json({ documents, trusted });
   } catch (error) {
     if (error instanceof SessionError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
@@ -34,6 +43,14 @@ export async function GET(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const sessionId = requireSessionId(req);
+
+    if (sessionId === SEED_SESSION_ID && !canWriteSharedNamespace(req)) {
+      return NextResponse.json(
+        { error: 'Not authorised to modify the shared namespace.' },
+        { status: 403 },
+      );
+    }
+
     const id = req.nextUrl.searchParams.get('id');
 
     // Scoped to the caller's own session, so the preloaded documents are not

@@ -68,6 +68,15 @@ if (!supabaseUrl || !serviceKey) {
   process.exit(1);
 }
 
+const seedToken = process.env.SEED_TOKEN;
+if (!seedToken) {
+  console.error(
+    'SEED_TOKEN must be set. Writes to the shared namespace are rejected without it —\n' +
+      'its id is a public constant, so anything else would let a stranger inject documents.',
+  );
+  process.exit(1);
+}
+
 const dbHeaders = {
   apikey: serviceKey,
   Authorization: `Bearer ${serviceKey}`,
@@ -130,7 +139,7 @@ for (const file of files) {
 
   const response = await fetch(`${baseUrl}/api/ingest`, {
     method: 'POST',
-    headers: { 'x-session-id': SEED_SESSION_ID },
+    headers: { 'x-session-id': SEED_SESSION_ID, 'x-seed-token': seedToken },
     body: form,
   });
   const payload = await response.json().catch(() => ({}));

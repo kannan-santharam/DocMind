@@ -32,9 +32,43 @@ export function readSessionId(req: NextRequest): string | null {
  */
 export const SEED_SESSION_ID = '00000000-0000-4000-8000-000000000001';
 
-/** Namespaces a visitor may read from: their own, plus the public one. */
-export function readableSessions(sessionId: string): string[] {
-  return sessionId === SEED_SESSION_ID ? [sessionId] : [sessionId, SEED_SESSION_ID];
+/**
+ * Namespaces a visitor may read from.
+ *
+ * Their own always. The preloaded namespace only when viewing through a trusted
+ * origin — reached directly, the app starts empty and asks for an upload.
+ *
+ * Order matters: the caller's own namespace is always first, because retrieval
+ * reserves result slots for it by position.
+ */
+export function readableSessions(sessionId: string, includePreloaded: boolean): string[] {
+  if (sessionId === SEED_SESSION_ID) return [sessionId];
+  return includePreloaded ? [sessionId, SEED_SESSION_ID] : [sessionId];
+}
+
+/**
+ * Writes to the shared namespace require a secret.
+ *
+ * SEED_SESSION_ID is a constant in a public repository, so without this anyone
+ * could POST a document under it and have it appear, permanently and to every
+ * visitor, as part of Kannan's indexed profile — cited by the agent as fact. The
+ * read path is deliberately open; only writing is gated.
+ *
+ * No token configured means seeding is disabled rather than open. Fail closed.
+ */
+export function canWriteSharedNamespace(req: NextRequest): boolean {
+  const expected = process.env.SEED_TOKEN;
+  if (!expected) return false;
+
+  const provided = req.headers.get('x-seed-token') ?? '';
+  // Same-length comparison, so the check does not leak the token's length.
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 export class SessionError extends Error {}

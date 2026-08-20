@@ -1,10 +1,15 @@
 import type { NextRequest } from 'next/server';
 
 /**
- * Direct contact details — phone number and email — are withheld when the app is
- * reached at its own URL, and released when it is reached through the portfolio.
+ * What a visitor sees depends on where they are viewing from.
  *
- * Two things about this are worth being precise on.
+ * Through the portfolio, DocMind is Kannan's assistant: his profile and the
+ * architecture write-up are preloaded, and his phone number and email are
+ * available. At its own URL it is a blank document Q&A tool — nothing preloaded,
+ * upload something to begin — because there it is a public endpoint that anyone,
+ * and anything, can talk to.
+ *
+ * Two things about the contact half are worth being precise on.
  *
  * First, it is redaction at retrieval, not a rule in the prompt. A system
  * instruction saying "do not share the phone number" still puts the phone number
@@ -52,15 +57,21 @@ export function containsContactDetails(text: string): boolean {
 }
 
 /**
- * Origins allowed to see contact details, as a comma-separated env value:
+ * Origins that get the full experience, as a comma-separated env value:
  *
- *   TRUSTED_CONTACT_ORIGINS=https://kannan-ai-dev.vercel.app,https://kannan.dev
+ *   TRUSTED_ORIGINS=https://kannan-ai-dev.vercel.app,http://localhost:5173
  *
- * Unset means no origin is trusted, so details are withheld everywhere — the safe
- * default if the variable is ever lost.
+ * Two things are gated on this, both answering the same question — "is this being
+ * viewed through the portfolio?":
+ *
+ *   1. the preloaded documents (profile, skills, architecture write-up)
+ *   2. the phone number and email inside them
+ *
+ * Unset means nothing is trusted, so the app is a blank document Q&A tool
+ * everywhere — the safe default if the variable is ever lost.
  */
 function trustedOrigins(): string[] {
-  return (process.env.TRUSTED_CONTACT_ORIGINS ?? '')
+  return (process.env.TRUSTED_ORIGINS ?? '')
     .split(',')
     .map((origin) => origin.trim().replace(/\/+$/, '').toLowerCase())
     .filter(Boolean);
@@ -72,7 +83,7 @@ function trustedOrigins(): string[] {
  * therefore covered: a link from the portfolio carries `?from=`, an iframe
  * carries the parent origin.
  */
-export function isTrustedContext(req: NextRequest): boolean {
+export function isTrustedOrigin(req: NextRequest): boolean {
   const allowed = trustedOrigins();
   if (!allowed.length) return false;
 

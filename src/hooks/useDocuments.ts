@@ -21,11 +21,15 @@ export function useDocuments(sessionId: string) {
   /** Non-fatal parser warnings from the last upload: what could not be read. */
   const [notices, setNotices] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
+  /** Whether this origin gets the preloaded documents at all. */
+  const [trusted, setTrusted] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!sessionId) return;
     try {
-      setDocuments(await fetchDocuments(sessionId));
+      const list = await fetchDocuments(sessionId);
+      setDocuments(list.documents);
+      setTrusted(list.trusted);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load documents.');
     } finally {
@@ -86,6 +90,7 @@ export function useDocuments(sessionId: string) {
 
   return {
     documents,
+    trusted,
     uploading,
     error,
     notices,

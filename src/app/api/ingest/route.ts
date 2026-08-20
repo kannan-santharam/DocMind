@@ -3,7 +3,12 @@ import { chunkDocument } from '@/lib/chunk';
 import { embedDocuments, QuotaExhaustedError } from '@/lib/gemini';
 import { MAX_UPLOAD_BYTES, ParseError, parsePastedText, parseUpload } from '@/lib/parse';
 import { checkRateLimit, LIMITS } from '@/lib/rateLimit';
-import { requireSessionId, SessionError } from '@/lib/session';
+import {
+  canWriteSharedNamespace,
+  requireSessionId,
+  SEED_SESSION_ID,
+  SessionError,
+} from '@/lib/session';
 import { supabase, toVectorLiteral } from '@/lib/supabase';
 import { startTrace } from '@/lib/tracing';
 
@@ -33,6 +38,13 @@ export async function POST(req: NextRequest) {
 
   try {
     const sessionId = requireSessionId(req);
+
+    if (sessionId === SEED_SESSION_ID && !canWriteSharedNamespace(req)) {
+      return NextResponse.json(
+        { error: 'Not authorised to write to the shared namespace.' },
+        { status: 403 },
+      );
+    }
 
     const limit = await checkRateLimit(
       sessionId,

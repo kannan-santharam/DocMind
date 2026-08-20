@@ -97,10 +97,20 @@ upload answers another visitor's question.
                                                               + citations event
 ```
 
+## Two modes, one deployment
+
+Reached through a **trusted origin** (`TRUSTED_ORIGINS`), the app is a personal
+assistant: documents from `docs/seed/` are preloaded and answerable immediately.
+Reached at its **own URL** it is a blank document Q&A tool — nothing preloaded, upload
+something to begin — because there it is a public endpoint anyone can talk to. The same
+check also decides whether contact details inside those documents survive redaction.
+
+Unset `TRUSTED_ORIGINS` means restricted mode everywhere. Fails closed.
+
 ## The preloaded documents
 
-Every visitor arrives with documents already indexed, so the first thing anyone can do
-is ask a question rather than hunt for a file to upload.
+Through a trusted origin, visitors arrive with documents already indexed, so the first
+thing they can do is ask a question rather than hunt for a file to upload.
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is always seeded — a full write-up of how
 this system is built and why — which means you can interrogate the system using the
 system.
@@ -127,6 +137,10 @@ pnpm dev                    # in one terminal
 pnpm seed                   # in another
 pnpm seed https://your-app.vercel.app   # or against the deployment
 ```
+
+Seeding needs `SEED_TOKEN`. The shared namespace's id is a constant in this repo, so
+without a secret anyone reading the source could inject documents into it — writes are
+rejected unless the token matches, and an unset token disables seeding entirely.
 
 ## Running locally
 

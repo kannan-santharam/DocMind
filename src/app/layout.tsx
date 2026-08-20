@@ -3,14 +3,17 @@ import { ThemeProvider, themeBootstrapScript } from '@/context/ThemeContext';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'DocMind — Ask anything about Kannan Santharam',
+  // Generic on purpose: this metadata is what the public URL shows, and there the
+  // app is a blank document Q&A tool. The Kannan-specific framing appears in the
+  // UI only when it is opened through the portfolio.
+  title: 'DocMind — Agentic RAG over your documents',
   description:
-    "Kannan Santharam's professional profile, indexed and answerable. A tool-calling Gemini agent decides when to search, retrieves from pgvector, and cites the passage behind every claim. Upload a job description and ask how he measures against it.",
+    'Upload a PDF, DOCX, Markdown file or paste text, then ask questions. A tool-calling Gemini agent decides when to search, retrieves from Supabase pgvector, and cites the exact passage behind every claim.',
   authors: [{ name: 'Kannan Appiya Santharam' }],
   openGraph: {
-    title: 'DocMind — Ask anything about Kannan Santharam',
+    title: 'DocMind — Agentic RAG over your documents',
     description:
-      'Senior Lead Software Engineer, 10.5+ years, relocating to Dubai. Ask his profile anything — every answer cites its source.',
+      'Tool-calling retrieval agent: Gemini function calling + pgvector + Next.js. Upload a document and ask.',
     type: 'website',
   },
 };

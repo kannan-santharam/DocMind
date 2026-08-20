@@ -38,6 +38,20 @@ export const CONTACT_WITHHELD_INSTRUCTION = `Direct contact details:
 - If someone asks how to reach Kannan, say his phone number and email are shared through his portfolio site rather than here, and point them to his portfolio or LinkedIn (linkedin.com/in/askannan). Both are fine to give out.
 - Do not guess, reconstruct or partially reveal a removed number or address, and do not treat the placeholder as though the information were missing from the documents.`;
 
+/**
+ * Appended when nothing is indexed for this visitor.
+ *
+ * Without it the agent searches, gets nothing, rephrases, searches again, and
+ * only then concludes the corpus is empty — three round trips to reach a fact
+ * one query already established. On a daily model quota that is worth avoiding.
+ */
+export const EMPTY_CORPUS_INSTRUCTION = `Current state: no documents are indexed for this visitor.
+
+- Do NOT call search_document or list_sections. There is nothing to search; you already know the result.
+- Say plainly that nothing has been uploaded yet, and invite them to add a PDF, DOCX, Markdown file, or pasted text using the upload panel on the left.
+- Mention briefly what happens next: the document is split into passages, embedded, and then you answer questions from it with citations.
+- Still answer ordinary conversational turns normally.`;
+
 export const TOOLS: FunctionDeclaration[] = [
   {
     name: 'search_document',
@@ -71,8 +85,13 @@ export const TOOLS: FunctionDeclaration[] = [
 interface AgentContext {
   sessionId: string;
   settings: ChatSettings;
-  /** False when reached outside the portfolio: strip phone and email from results. */
-  allowContactDetails: boolean;
+  /**
+   * True when viewed through a trusted origin. Reached directly, the preloaded
+   * documents are out of scope and contact details are stripped from whatever is
+   * retrieved — the two halves of "is this the portfolio's assistant, or a blank
+   * public tool?".
+   */
+  trusted: boolean;
   trace?: Trace;
   emit: (event: ChatStreamEvent) => void;
   /** Accumulates every cited passage across all searches in this answer. */
@@ -95,9 +114,7 @@ function addCitations(context: AgentContext, rows: RetrievedChunk[]) {
       filename: row.filename,
       heading: row.heading,
       page: row.page_from,
-      snippet: context.allowContactDetails
-        ? row.content
-        : redactContactDetails(row.content),
+      snippet: context.trusted ? row.content : redactContactDetails(row.content),
       similarity: row.similarity,
     });
     numbered.push({ marker, row });
@@ -127,7 +144,7 @@ async function runSearch(context: AgentContext, args: Record<string, unknown>) {
   // One search per readable namespace, in parallel, then merged and re-ranked.
   // Scores are comparable across the calls: same metric, same query vector.
   const searches = await Promise.all(
-    readableSessions(context.sessionId).map((session) =>
+    readableSessions(context.sessionId, context.trusted).map((session) =>
       supabase().rpc('match_chunks', {
         query_embedding: vector,
         p_session_id: session,
@@ -199,7 +216,7 @@ async function runSearch(context: AgentContext, args: Record<string, unknown>) {
       similarity: Number(row.similarity.toFixed(3)),
       // Redacted here, not merely forbidden by the prompt: a passage the model
       // never sees cannot be talked out of it.
-      text: context.allowContactDetails ? row.content : redactContactDetails(row.content),
+      text: context.trusted ? row.content : redactContactDetails(row.content),
     })),
   };
 }
@@ -208,7 +225,7 @@ async function runListSections(context: AgentContext) {
   const { data, error } = await supabase()
     .from('documents')
     .select('filename, source_kind, page_count, chunk_count, outline, session_id')
-    .in('session_id', readableSessions(context.sessionId))
+    .in('session_id', readableSessions(context.sessionId, context.trusted))
     .order('created_at', { ascending: true });
 
   if (error) return { error: `Could not list documents: ${error.message}` };
@@ -258,19 +275,20 @@ export async function runAgent(options: {
   settings?: ChatSettings;
   models?: string[];
   trace?: Trace;
-  allowContactDetails?: boolean;
+  trusted?: boolean;
 }): Promise<void> {
   const { sessionId, history, emit, signal, models, trace } = options;
   const settings = options.settings ?? DEFAULT_SETTINGS;
-  const allowContactDetails = options.allowContactDetails ?? false;
-  const context: AgentContext = {
-    sessionId,
-    settings,
-    allowContactDetails,
-    trace,
-    emit,
-    citations: [],
-  };
+  const trusted = options.trusted ?? false;
+  const context: AgentContext = { sessionId, settings, trusted, trace, emit, citations: [] };
+
+  // One indexed count-only query, against a btree index on session_id. Cheaper
+  // than the two extra model turns it saves when the corpus is empty.
+  const { count } = await supabase()
+    .from('documents')
+    .select('id', { count: 'exact', head: true })
+    .in('session_id', readableSessions(sessionId, trusted));
+  const corpusEmpty = (count ?? 0) === 0;
   const contents = [...history];
   let answer = '';
   let reportedModel = '';
@@ -297,12 +315,16 @@ export async function runAgent(options: {
     try {
       result = await streamTurn({
         contents,
-        systemInstruction: allowContactDetails
-        ? SYSTEM_INSTRUCTION
-        : `${SYSTEM_INSTRUCTION}\n\n${CONTACT_WITHHELD_INSTRUCTION}`,
+          systemInstruction: [
+          SYSTEM_INSTRUCTION,
+          trusted ? null : CONTACT_WITHHELD_INSTRUCTION,
+          corpusEmpty ? EMPTY_CORPUS_INSTRUCTION : null,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
         // Withholding tools on the last turn forces a text answer instead of a
         // tool call the loop has no budget left to execute.
-        tools: isFinalTurn ? undefined : TOOLS,
+        tools: isFinalTurn || corpusEmpty ? undefined : TOOLS,
         models,
         signal,
         onText: (delta) => {

@@ -545,11 +545,51 @@ no-op and the app is unchanged, and no tracing call is allowed to throw into a r
 path. Observability that can take the product down when the observability vendor has a
 bad day is a liability rather than an asset.
 
+## Why does the app show different things at different URLs?
+
+Two audiences, one deployment. Opened through the portfolio it is Kannan's
+assistant: his profile, his skills and this architecture write-up are preloaded, and
+his phone number and email are available. Opened at its own URL it is a blank
+document Q&A tool — nothing preloaded, upload something to begin — because there it
+is a public endpoint that anyone, and anything, can talk to.
+
+Both behaviours come from one check. The client reports the origin of the top-level
+page it is running under: `window.location.ancestorOrigins[0]` when embedded in an
+iframe, its own origin otherwise. The server matches that against an allowlist and
+that single boolean decides two things — whether the preloaded namespace is
+searchable at all, and whether contact details survive redaction. An unset allowlist
+means restricted mode everywhere, so losing the configuration fails closed.
+
+There is a nice side effect. With nothing indexed, the agent is told so up front and
+its tools are withheld, so it answers immediately instead of searching, finding
+nothing, rephrasing, searching again and only then concluding the corpus is empty.
+That is three round trips saved on a daily model quota, and a better answer.
+
+## Why can't anyone write to the preloaded documents?
+
+The shared namespace is identified by a fixed UUID, and that UUID is a constant in a
+public repository. Reads from it are gated by origin, but the write path was
+initially open — which meant anyone who read the source could POST a document under
+that id and have it appear, permanently and to every visitor, as part of Kannan's
+indexed profile. The agent would then cite it as fact.
+
+I found this by asking what the public repo gives away, and confirmed it by doing
+it: a made-up claim about salary expectations went straight into the corpus.
+
+Writes to that namespace now require a secret from an environment variable,
+compared in constant time, and an unset variable disables seeding rather than
+opening it. Ordinary visitors uploading their own documents are unaffected; only the
+shared namespace is gated.
+
+The general lesson: a public identifier is not a permission. Choosing a well-known
+constant for a namespace is fine, but every write path to it needs its own check —
+and open-sourcing a project changes the threat model of every constant in it.
+
 ## How are direct contact details handled?
 
-The preloaded profile contains a phone number and an email address. Those are shared
-when the app is reached through the portfolio, and withheld when it is reached at its
-own URL, where it is a public chatbot that anyone or anything can talk to.
+The preloaded profile contains a phone number and an email address. Those follow the
+same origin rule as the documents themselves — available through the portfolio,
+withheld at the public URL.
 
 The mechanism matters more than the policy. The obvious implementation is a line in the
 system instruction saying not to reveal the number — and that is close to useless,
