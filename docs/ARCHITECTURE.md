@@ -130,16 +130,34 @@ model or shown twice in the citation.
 
 ## Why 768-dimensional embeddings when the model returns 3072?
 
-Two reasons, one hard and one soft. The hard reason: pgvector's HNSW index refuses
-vectors above 2000 dimensions, so the model's native 3072 cannot be indexed at all —
-searches would fall back to a sequential scan of every row.
+`gemini-embedding-001` is a **Matryoshka** model: it is trained so that a prefix of the
+vector is itself a valid embedding, with information front-loaded by importance. The
+first 768 components carry the most signal, the next refine it, and so on. Truncating is
+therefore a supported operation rather than a hack, and I verified the behaviour against
+the live API rather than trusting documentation — requesting 768, 1536 and 3072
+dimensions each returns exactly that many floats.
 
-The soft reason: `gemini-embedding-001` is a Matryoshka model, meaning it is trained so
-that the first N components of the vector are themselves a usable embedding. Truncating
-to 768 is a supported operation, not a hack. It costs a little retrieval accuracy and
-saves three-quarters of the storage and distance-computation cost. I verified the
-behaviour against the live API rather than trusting documentation: requesting 768, 1536
-and 3072 dimensions each returns exactly that many floats.
+The choice was made on index limits and cost:
+
+| Option | Bytes per vector | HNSW-indexable |
+|---|---|---|
+| `vector(3072)` — the model's default | 12,288 | no, the `vector` type caps at 2,000 dims |
+| `halfvec(3072)` — half precision | 6,144 | yes, `halfvec` indexes up to 4,000 dims |
+| `vector(768)` — what this uses | 3,072 | yes |
+
+**Being precise about that middle row, because it is the honest version of this
+decision:** 3072 dimensions *are* indexable, via `halfvec` at half precision. So the
+2,000-dimension limit ruled out the naive `vector(3072)` approach, not 3072 itself. The
+real reason for 768 is cost — a quarter of the storage of the fp32 original, half of the
+halfvec alternative, and distance computation that scales down with it — against a
+corpus where the discarded precision has nothing to disambiguate. Measured top matches
+sit at 0.6–0.8 with retrieval routing correctly between documents.
+
+Where the trade would go the other way: a large corpus of near-identical documents —
+contract versions, regulatory amendments, part catalogues — where the difference between
+two passages genuinely *is* a fine shade of meaning. There `halfvec(3072)` at twice the
+bytes would likely retrieve better, and the general finding is that more dimensions at
+lower precision beats fewer dimensions at higher precision for an equal byte budget.
 
 ## Why re-normalise a truncated embedding?
 

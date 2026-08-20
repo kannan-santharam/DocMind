@@ -50,10 +50,14 @@ returned, top similarity, latency — so the agency is demonstrated rather than 
 
 ### Four decisions worth explaining
 
-**768 dimensions, not 3072.** `gemini-embedding-001` returns 3072 by default, but
-pgvector's HNSW index rejects anything above 2000. It is a Matryoshka model, so a
-768-dim prefix is a valid embedding — re-normalised to unit length after truncation,
-since a sliced vector is no longer normalised and cosine distance would skew.
+**768 dimensions, not 3072.** `gemini-embedding-001` is a Matryoshka model — a prefix
+of the vector is itself a valid embedding, information front-loaded by importance — so
+truncation is supported rather than destructive. Re-normalised to unit length
+afterwards, since a sliced vector is no longer normalised and cosine distance would
+skew. Note the honest version: pgvector's `vector` type caps HNSW at 2000 dims so
+`vector(3072)` was out, but `halfvec` indexes to 4000, so `halfvec(3072)` was available
+and not taken. 768 is a cost choice — a quarter of the bytes of fp32 3072 — over a
+corpus where the dropped precision has nothing to disambiguate.
 
 **`unpdf`, not `pdf-parse`.** `pdf-parse` reads a bundled test PDF at import time,
 which throws the moment it is bundled into a serverless function. `unpdf` ships a

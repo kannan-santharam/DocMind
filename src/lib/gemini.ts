@@ -7,9 +7,17 @@ export const EMBED_MODEL = 'gemini-embedding-001';
 
 /**
  * gemini-embedding-001 returns 3072 dimensions by default. It is a Matryoshka
- * model, so a 768-dim prefix is a valid (slightly lossy) embedding — and
- * pgvector's HNSW index rejects anything over 2000 dimensions. Verified against
- * the live API: outputDimensionality 768 / 1536 / 3072 all return exactly that.
+ * model, so a 768-dim prefix is a valid (slightly lossy) embedding — information
+ * is front-loaded by importance, which is what makes truncation supported rather
+ * than destructive. Verified against the live API: outputDimensionality 768 /
+ * 1536 / 3072 all return exactly that.
+ *
+ * On 768 specifically: pgvector's `vector` type indexes up to 2000 dimensions
+ * with HNSW, so vector(3072) could not be indexed — but `halfvec` indexes up to
+ * 4000, so halfvec(3072) was available and not taken. The reason is cost, not
+ * impossibility: 3072 bytes per vector against 6144, with distance computation
+ * scaling to match, over a corpus where the dropped precision has nothing to
+ * disambiguate.
  */
 export const EMBED_DIM = 768;
 
