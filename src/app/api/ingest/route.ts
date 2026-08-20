@@ -55,24 +55,33 @@ export async function POST(req: NextRequest) {
   try {
     const sessionId = requireSessionId(req);
 
-    if (sessionId === SEED_SESSION_ID && !canWriteSharedNamespace(req)) {
+    // Writes to the shared namespace are authorised by a secret, and that secret
+    // is the control. Rate limiting them adds nothing and actively breaks
+    // seeding: limits are keyed on the caller's address, so a seed run of
+    // several documents spends the ordinary visitor budget for that address.
+    const seeding = sessionId === SEED_SESSION_ID;
+    if (seeding && !canWriteSharedNamespace(req)) {
       return NextResponse.json(
         { error: 'Not authorised to write to the shared namespace.' },
         { status: 403 },
       );
     }
 
-    const limit = await checkRateLimit(
-      rateLimitIdentity(req, sessionId),
-      'ingest',
-      LIMITS.ingest.windowSecs,
-      LIMITS.ingest.max,
-    );
-    if (!limit.allowed) {
-      return NextResponse.json(
-        { error: `Upload limit reached (${LIMITS.ingest.max}/hour). Try again after ${limit.resetsAt}.` },
-        { status: 429 },
+    if (!seeding) {
+      const limit = await checkRateLimit(
+        rateLimitIdentity(req, sessionId),
+        'ingest',
+        LIMITS.ingest.windowSecs,
+        LIMITS.ingest.max,
       );
+      if (!limit.allowed) {
+        return NextResponse.json(
+          {
+            error: `Upload limit reached (${LIMITS.ingest.max}/hour). Try again after ${limit.resetsAt}.`,
+          },
+          { status: 429 },
+        );
+      }
     }
 
     const contentType = req.headers.get('content-type') ?? '';

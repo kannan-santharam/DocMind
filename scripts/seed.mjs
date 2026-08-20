@@ -83,13 +83,6 @@ const dbHeaders = {
   'Content-Type': 'application/json',
 };
 
-async function clearRateLimits() {
-  await fetch(`${supabaseUrl}/rest/v1/rate_limits?session_id=eq.${SEED_SESSION_ID}`, {
-    method: 'DELETE',
-    headers: dbHeaders,
-  });
-}
-
 /** Ids of the currently-seeded documents, so they can be swapped out one by one. */
 async function listSeeded() {
   const response = await fetch(
@@ -130,13 +123,12 @@ async function collect() {
 const files = await collect();
 console.log(`\nSeeding ${files.length} document(s) → ${baseUrl}`);
 
-// Clear only the rate-limit counters up front — re-seeding more than ten times an
-// hour would otherwise trip the ingest limit. The documents themselves are left
-// in place until their replacements are indexed: purging first means a failed
-// run (an exhausted embedding quota, a network blip) leaves visitors with an
-// empty corpus, which is exactly what happened once.
-await clearRateLimits();
-
+// Documents are left in place until their replacements are indexed: purging
+// first means a failed run — an exhausted embedding quota, a network blip —
+// leaves visitors with an empty corpus, which is exactly what happened once.
+//
+// No rate-limit clearing needed: authorised writes to the shared namespace skip
+// the limiter, since the token is the control.
 const existing = await listSeeded();
 let failed = 0;
 let passages = 0;
