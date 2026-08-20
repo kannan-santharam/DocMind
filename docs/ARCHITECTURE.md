@@ -468,13 +468,26 @@ even an accidentally leaked anonymous key reads nothing.
 ## How is the demo protected from draining the free quota?
 
 A fixed-window rate limit enforced in Postgres: 25 messages per 10 minutes and 10
-uploads per hour, per session. The counter lives in the database rather than in memory
-because every serverless invocation may land on a fresh instance, so process memory is
-not shared state and an in-memory counter would reset constantly.
+uploads per hour. The counter lives in the database rather than in memory because every
+serverless invocation may land on a fresh instance, so process memory is not shared
+state and an in-memory counter would reset constantly.
+
+It is counted against a hash of the caller's IP address, and this is the part worth
+explaining. The obvious key is the session id — and it is useless, because the session
+id is a UUID the browser generates, so rotating it resets the counter. I confirmed that
+by doing it: five uploads under five fresh ids, five successes. Against a free tier
+where two models allow twenty requests a *day*, a short loop could take the demo down
+for everyone. The address is the client-visible identity that cannot be changed at
+will. It is hashed before storage, because an IP is personal data and counting requests
+does not require keeping it in plaintext.
+
+The trade-off is that visitors behind one NAT — an office, a university — share a
+budget. For a portfolio demo that is the right side of the trade.
 
 The limiter fails open. If the rate-limit query itself errors, the request is allowed
 through. A protective mechanism that takes the whole demo offline when it hiccups is
-worse than the abuse it prevents.
+worse than the abuse it prevents — though it does mean the weakest control has the
+weakest failure mode, which is a deliberate choice rather than an oversight.
 
 ## Why does PDF parsing use unpdf instead of pdf-parse?
 
@@ -559,6 +572,21 @@ iframe, its own origin otherwise. The server matches that against an allowlist a
 that single boolean decides two things — whether the preloaded namespace is
 searchable at all, and whether contact details survive redaction. An unset allowlist
 means restricted mode everywhere, so losing the configuration fails closed.
+
+**What this does and does not stop.** The origin arrives in a request header set by
+the page, so a client that is not a browser can simply assert it — one `curl -H` and
+the preloaded documents are readable. It stops crawlers, scrapers, link previews and
+anyone arriving at the public URL, which is the traffic that actually exists. It does
+not stop someone who reads this repository and sends a header, and the same
+information is published on the portfolio anyway.
+
+Making it robust would need a secret neither side exposes: the portfolio's server
+minting a short-lived signed token that DocMind verifies. That is not available here
+— the portfolio is a static single-page app with no server to hold a key, and a
+secret shipped in its client bundle is not a secret. So the honest description is a
+gate proportionate to the exposure, not an access control, and the contact redaction
+underneath it is the layer that genuinely holds: that data never enters the model's
+context at all.
 
 There is a nice side effect. With nothing indexed, the agent is told so up front and
 its tools are withheld, so it answers immediately instead of searching, finding

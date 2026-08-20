@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { runAgent } from '@/lib/agent';
 import type { GeminiContent } from '@/lib/gemini';
 import { resolveModels } from '@/lib/models';
-import { checkRateLimit, LIMITS } from '@/lib/rateLimit';
+import { checkRateLimit, LIMITS, rateLimitIdentity } from '@/lib/rateLimit';
 import { isTrustedOrigin } from '@/lib/privacy';
 import { normaliseSettings } from '@/lib/settings';
 import { requireSessionId, SessionError } from '@/lib/session';
@@ -53,7 +53,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const limit = await checkRateLimit(sessionId, 'chat', LIMITS.chat.windowSecs, LIMITS.chat.max);
+  const limit = await checkRateLimit(
+    rateLimitIdentity(req, sessionId),
+    'chat',
+    LIMITS.chat.windowSecs,
+    LIMITS.chat.max,
+  );
   if (!limit.allowed) {
     return NextResponse.json(
       {

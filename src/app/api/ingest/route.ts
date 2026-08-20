@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { chunkDocument } from '@/lib/chunk';
 import { embedDocuments, QuotaExhaustedError } from '@/lib/gemini';
 import { MAX_UPLOAD_BYTES, ParseError, parsePastedText, parseUpload } from '@/lib/parse';
-import { checkRateLimit, LIMITS } from '@/lib/rateLimit';
+import { checkRateLimit, LIMITS, rateLimitIdentity } from '@/lib/rateLimit';
 import {
   canWriteSharedNamespace,
   requireSessionId,
@@ -29,6 +29,22 @@ export const maxDuration = 60;
  */
 const MAX_CHUNKS = 80;
 
+/**
+ * Ceiling on extracted text, checked before chunking.
+ *
+ * The 4MB upload limit bounds *compressed* input: DOCX is a zip and PDF content
+ * streams are Flate-compressed, so repetitive content at high compression ratios
+ * can expand to orders of magnitude more text. Without this, all of it would be
+ * chunked, and only then rejected by MAX_CHUNKS — doing the expensive work first
+ * and throwing it away.
+ *
+ * 80 passages of ~1100 characters is roughly 88,000, so this leaves headroom for
+ * a document that legitimately lands near the passage cap while stopping runaway
+ * input early. It does not bound peak memory inside the parsers themselves,
+ * which materialise their own output; bounding that would need streaming parsers.
+ */
+const MAX_TEXT_CHARS = 150_000;
+
 /** Leave a margin under maxDuration so a quota wait fails loudly, not by timeout. */
 const DEADLINE_MS = 50_000;
 
@@ -47,7 +63,7 @@ export async function POST(req: NextRequest) {
     }
 
     const limit = await checkRateLimit(
-      sessionId,
+      rateLimitIdentity(req, sessionId),
       'ingest',
       LIMITS.ingest.windowSecs,
       LIMITS.ingest.max,
@@ -78,6 +94,15 @@ export async function POST(req: NextRequest) {
       parsed = parsePastedText(body.text ?? '');
       filename = (body.title ?? '').trim() || 'Pasted text';
       mime = 'text/plain';
+    }
+
+    if (parsed.text.length > MAX_TEXT_CHARS) {
+      return NextResponse.json(
+        {
+          error: `That file expands to ${Math.round(parsed.text.length / 1000)}k characters of text; this demo indexes up to ${MAX_TEXT_CHARS / 1000}k. Try a shorter document.`,
+        },
+        { status: 413 },
+      );
     }
 
     const { chunks, outline: detected } = chunkDocument(parsed.text, {

@@ -83,21 +83,30 @@ const dbHeaders = {
   'Content-Type': 'application/json',
 };
 
-async function purge() {
-  // Chunks cascade from documents.
-  const documents = await fetch(
-    `${supabaseUrl}/rest/v1/documents?session_id=eq.${SEED_SESSION_ID}`,
-    { method: 'DELETE', headers: { ...dbHeaders, Prefer: 'return=representation' } },
-  );
-  const removed = documents.ok ? (await documents.json()).length : 0;
-
-  // Re-seeding more than ten times an hour would otherwise trip the ingest limit.
+async function clearRateLimits() {
   await fetch(`${supabaseUrl}/rest/v1/rate_limits?session_id=eq.${SEED_SESSION_ID}`, {
     method: 'DELETE',
     headers: dbHeaders,
   });
+}
 
-  return removed;
+/** Ids of the currently-seeded documents, so they can be swapped out one by one. */
+async function listSeeded() {
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/documents?session_id=eq.${SEED_SESSION_ID}&select=id,filename`,
+    { headers: dbHeaders },
+  );
+  return response.ok ? await response.json() : [];
+}
+
+/** Chunks cascade from documents, so one delete per id is enough. */
+async function removeById(ids) {
+  for (const id of ids) {
+    await fetch(`${supabaseUrl}/rest/v1/documents?id=eq.${id}`, {
+      method: 'DELETE',
+      headers: dbHeaders,
+    });
+  }
 }
 
 async function collect() {
@@ -121,9 +130,14 @@ async function collect() {
 const files = await collect();
 console.log(`\nSeeding ${files.length} document(s) → ${baseUrl}`);
 
-const removed = await purge();
-if (removed) console.log(`  removed ${removed} previous version(s)\n`);
+// Clear only the rate-limit counters up front — re-seeding more than ten times an
+// hour would otherwise trip the ingest limit. The documents themselves are left
+// in place until their replacements are indexed: purging first means a failed
+// run (an exhausted embedding quota, a network blip) leaves visitors with an
+// empty corpus, which is exactly what happened once.
+await clearRateLimits();
 
+const existing = await listSeeded();
 let failed = 0;
 let passages = 0;
 
@@ -152,7 +166,17 @@ for (const file of files) {
   }
 
   passages += payload.document.chunk_count;
-  console.log(`  ✓ ${name} — ${payload.document.chunk_count} passages`);
+
+  // The replacement is indexed; now retire any earlier copy of the same title.
+  const superseded = existing
+    .filter((doc) => doc.filename === file.title && doc.id !== payload.document.id)
+    .map((doc) => doc.id);
+  await removeById(superseded);
+
+  console.log(
+    `  ✓ ${name} — ${payload.document.chunk_count} passages` +
+      (superseded.length ? ` (replaced previous copy)` : ''),
+  );
   for (const note of payload.notes ?? []) console.log(`      note: ${note}`);
 }
 
