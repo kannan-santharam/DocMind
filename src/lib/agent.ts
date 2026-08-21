@@ -1,5 +1,6 @@
 import { embedQuery, streamTurn, type FunctionDeclaration, type GeminiContent, type GeminiPart } from './gemini';
 import { redactContactDetails } from './privacy';
+import { DEFAULT_REGION, excludedRegionDocument, type Region } from './region';
 import { readableSessions, SEED_SESSION_ID } from './session';
 import { supabase, toVectorLiteral } from './supabase';
 import type { Citation, ChatStreamEvent, RetrievedChunk } from './types';
@@ -37,6 +38,20 @@ export const CONTACT_WITHHELD_INSTRUCTION = `Direct contact details:
 - Passages may contain the placeholder "[contact details shared via the portfolio]" where a phone number or email address was removed. That removal is deliberate.
 - If someone asks how to reach Kannan, say his phone number and email are shared through his portfolio site rather than here, and point them to his portfolio or LinkedIn (linkedin.com/in/askannan). Both are fine to give out.
 - Do not guess, reconstruct or partially reveal a removed number or address, and do not treat the placeholder as though the information were missing from the documents.`;
+
+/**
+ * Appended for visitors in India.
+ *
+ * The filter in `runSearch` already keeps the Dubai edition out of retrieval, so
+ * this is not what does the work — it exists because the model has its own idea
+ * of what a "relocation" answer sounds like, and because a stray mention could
+ * still arrive through the conversation history rather than a passage.
+ */
+export const INDIA_VISITOR_INSTRUCTION = `Location framing for this visitor:
+- Kannan is based in Chennai, India, and is being considered here for roles in India.
+- Do not raise relocation to Dubai or the UAE, visa sponsorship, employment visas, or AED compensation. That framing belongs to a different audience and is not part of what is indexed for this one.
+- If asked where he is based or whether he is available, answer from the indexed availability material and cite it, exactly as you would any other question. Do not state location, notice period or sponsorship status from this instruction — if the passages do not cover it, say so.
+- If someone explicitly asks about working abroad or in the UAE, do not invent a position — say the indexed documents cover his availability in India and suggest asking him directly.`;
 
 /**
  * Appended when nothing is indexed for this visitor.
@@ -92,6 +107,12 @@ interface AgentContext {
    * public tool?".
    */
   trusted: boolean;
+  /**
+   * Which edition of the preloaded profile applies. Independent of `trusted`:
+   * trust decides whether the profile is readable at all, region decides which
+   * availability story it tells.
+   */
+  region: Region;
   trace?: Trace;
   emit: (event: ChatStreamEvent) => void;
   /** Accumulates every cited passage across all searches in this answer. */
@@ -170,7 +191,26 @@ async function runSearch(context: AgentContext, args: Record<string, unknown>) {
 
   // searches[0] is always the visitor's own namespace (see readableSessions).
   const own = dedupe(((searches[0]?.data ?? []) as RetrievedChunk[]).sort(byScore));
-  const shared = dedupe(((searches[1]?.data ?? []) as RetrievedChunk[]).sort(byScore));
+
+  /**
+   * The other region's availability document is dropped here, before anything
+   * downstream can see it.
+   *
+   * This has to happen at retrieval rather than in the system instruction,
+   * because `addCitations` puts the raw passage text into the citation panel. A
+   * model that obediently never says "Dubai" would still leave a card on screen
+   * headed "Is Kannan available to relocate to Dubai, and what is his visa
+   * status?" — the prompt cannot reach that.
+   *
+   * Applied to the shared namespace only, so a recruiter who uploads a Dubai job
+   * description still gets their own document searched and cited.
+   */
+  const excluded = excludedRegionDocument(context.region);
+  const shared = dedupe(
+    ((searches[1]?.data ?? []) as RetrievedChunk[])
+      .filter((row) => row.filename !== excluded)
+      .sort(byScore),
+  );
 
   /**
    * Guaranteed representation for the visitor's own uploads.
@@ -229,12 +269,20 @@ async function runListSections(context: AgentContext) {
     .order('created_at', { ascending: true });
 
   if (error) return { error: `Could not list documents: ${error.message}` };
-  if (!data?.length) {
+
+  // Same exclusion as retrieval — otherwise the wrong edition stays invisible to
+  // search but announces itself by name the moment anyone asks what is indexed.
+  const excluded = excludedRegionDocument(context.region);
+  const visible = (data ?? []).filter(
+    (doc) => !(doc.session_id === SEED_SESSION_ID && doc.filename === excluded),
+  );
+
+  if (!visible.length) {
     return { documents: [], note: 'No documents have been uploaded in this session yet.' };
   }
 
   return {
-    documents: data.map((doc) => ({
+    documents: visible.map((doc) => ({
       filename: doc.filename,
       kind: doc.source_kind,
       preloaded: doc.session_id === SEED_SESSION_ID || undefined,
@@ -276,11 +324,21 @@ export async function runAgent(options: {
   models?: string[];
   trace?: Trace;
   trusted?: boolean;
+  region?: Region;
 }): Promise<void> {
   const { sessionId, history, emit, signal, models, trace } = options;
   const settings = options.settings ?? DEFAULT_SETTINGS;
   const trusted = options.trusted ?? false;
-  const context: AgentContext = { sessionId, settings, trusted, trace, emit, citations: [] };
+  const region = options.region ?? DEFAULT_REGION;
+  const context: AgentContext = {
+    sessionId,
+    settings,
+    trusted,
+    region,
+    trace,
+    emit,
+    citations: [],
+  };
 
   // One indexed count-only query, against a btree index on session_id. Cheaper
   // than the two extra model turns it saves when the corpus is empty.
@@ -318,6 +376,9 @@ export async function runAgent(options: {
           systemInstruction: [
           SYSTEM_INSTRUCTION,
           trusted ? null : CONTACT_WITHHELD_INSTRUCTION,
+          // Independent of trust: a trusted Indian recruiter gets the contact
+          // details and the India framing, not one or the other.
+          region === 'india' ? INDIA_VISITOR_INSTRUCTION : null,
           corpusEmpty ? EMPTY_CORPUS_INSTRUCTION : null,
         ]
           .filter(Boolean)

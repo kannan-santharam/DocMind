@@ -222,6 +222,7 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
           isStreaming={chat.isStreaming}
           hasDocuments={docs.documents.length > 0}
           onlyPreloaded={docs.documents.length > 0 && ownedDocuments.length === 0}
+          region={docs.region}
           documentsLoaded={docs.loaded}
           onPickPrompt={(prompt) => submit(prompt)}
         />

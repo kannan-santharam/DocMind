@@ -7,6 +7,7 @@ import {
   ingestText,
   uploadFile,
 } from '@/lib/client';
+import { DEFAULT_REGION, type Region } from '@/lib/region';
 import type { DocumentRecord } from '@/lib/types';
 
 export interface UploadState {
@@ -23,6 +24,8 @@ export function useDocuments(sessionId: string) {
   const [loaded, setLoaded] = useState(false);
   /** Whether this origin gets the preloaded documents at all. */
   const [trusted, setTrusted] = useState(false);
+  /** Which edition of the profile is preloaded — decided server-side, from the request. */
+  const [region, setRegion] = useState<Region>(DEFAULT_REGION);
 
   const refresh = useCallback(async () => {
     if (!sessionId) return;
@@ -30,6 +33,7 @@ export function useDocuments(sessionId: string) {
       const list = await fetchDocuments(sessionId);
       setDocuments(list.documents);
       setTrusted(list.trusted);
+      setRegion(list.region);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load documents.');
     } finally {
@@ -91,6 +95,7 @@ export function useDocuments(sessionId: string) {
   return {
     documents,
     trusted,
+    region,
     uploading,
     error,
     notices,

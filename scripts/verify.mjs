@@ -9,7 +9,8 @@
  * here rather than in front of a recruiter.
  */
 
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
@@ -200,8 +201,53 @@ async function checkLangfuse() {
   }
 }
 
+/**
+ * The region filter in `src/lib/region.ts` keys off exact filenames in
+ * `docs/seed/`. Renaming a seed file would otherwise break it silently: the
+ * filter would match nothing, and a visitor in India would quietly start seeing
+ * the Dubai edition again. Cheap to assert here, expensive to notice in a demo.
+ */
+async function checkRegionDocuments() {
+  const seedDir = fileURLToPath(new URL('../docs/seed/', import.meta.url));
+  const source = await readFile(
+    fileURLToPath(new URL('../src/lib/region.ts', import.meta.url)),
+    'utf8',
+  );
+
+  const expected = [...source.matchAll(/^\s*(dubai|india):\s*'(.+?)',$/gm)].map((m) => ({
+    region: m[1],
+    filename: m[2],
+  }));
+
+  if (expected.length !== 2) {
+    fail('Region documents', 'could not parse REGION_DOCUMENTS from src/lib/region.ts');
+    return;
+  }
+
+  let present;
+  try {
+    present = await readdir(seedDir);
+  } catch {
+    console.log(
+      `${DIM}○${RESET} Region documents ${DIM}docs/seed/ not present — gitignored, seed locally to check${RESET}`,
+    );
+    return;
+  }
+
+  const missing = expected.filter((doc) => !present.includes(doc.filename));
+  if (missing.length) {
+    fail(
+      'Region documents',
+      `missing from docs/seed/: ${missing.map((d) => d.filename).join(', ')}`,
+    );
+    return;
+  }
+  pass('Region documents', expected.map((d) => `${d.region} → ${d.filename}`).join(' · '));
+}
+
 await loadEnv();
 console.log('\nDocMind preflight\n');
+await checkRegionDocuments();
 await checkGemini();
 await checkGeminiChat();
 await checkSupabase();

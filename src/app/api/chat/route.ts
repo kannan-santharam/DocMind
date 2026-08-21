@@ -4,6 +4,7 @@ import type { GeminiContent } from '@/lib/gemini';
 import { resolveModels } from '@/lib/models';
 import { checkRateLimit, LIMITS, rateLimitIdentity } from '@/lib/rateLimit';
 import { isTrustedOrigin } from '@/lib/privacy';
+import { resolveRegion } from '@/lib/region';
 import { normaliseSettings } from '@/lib/settings';
 import { requireSessionId, SessionError } from '@/lib/session';
 import { startTrace } from '@/lib/tracing';
@@ -42,9 +43,11 @@ export async function POST(req: NextRequest) {
   const settings = normaliseSettings(body?.settings);
   const models = resolveModels(settings.model);
 
-  // Decided from the request. Gates the preloaded documents and the contact
-  // details inside them.
+  // Two independent facts about the visitor, both read off the request.
+  // Trust gates the preloaded documents and the contact details inside them;
+  // region picks which availability edition of the profile is in scope.
   const trusted = isTrustedOrigin(req);
+  const region = resolveRegion(req);
 
   if (!messages.length || messages[messages.length - 1]?.role !== 'user') {
     return NextResponse.json(
@@ -100,6 +103,9 @@ export async function POST(req: NextRequest) {
       maxTurns: settings.maxTurns,
       historyTurns: history.length,
       origin: trusted ? 'portfolio' : 'direct',
+      // On the trace so it is possible to confirm the geo header actually
+      // arrives in production, which is otherwise untestable from here.
+      region,
     },
   });
 
@@ -125,6 +131,7 @@ export async function POST(req: NextRequest) {
           models,
           trace,
           trusted,
+          region,
         });
         emit({ type: 'done' });
       } catch (error) {

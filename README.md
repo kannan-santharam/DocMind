@@ -111,6 +111,21 @@ check also decides whether contact details inside those documents survive redact
 
 Unset `TRUSTED_ORIGINS` means restricted mode everywhere. Fails closed.
 
+## Two editions, decided by country
+
+A second and deliberately independent signal. `x-vercel-ip-country` picks which edition
+of the preloaded profile is in scope: the Dubai relocation one by default, the
+Chennai-based one for visitors in India — mirroring the split the portfolio already
+ships. Trust decides *whether* the profile is readable; region decides *which* one. A
+recruiter in India arriving through the portfolio is both trusted and Indian, and gets
+the contact details **and** the India framing.
+
+Implemented by partitioning the corpus rather than by prompting: the region-specific
+sections live in their own seed documents, and retrieval drops the edition that does not
+apply before citations are built, so nothing leaks through the citation panel. No new
+environment variable — the signal is a request header. Append `?region=in` to override
+it, which is how the path is testable at all off Vercel.
+
 ## The preloaded documents
 
 Through a trusted origin, visitors arrive with documents already indexed, so the first

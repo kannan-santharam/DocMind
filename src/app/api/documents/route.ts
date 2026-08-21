@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { isTrustedOrigin } from '@/lib/privacy';
+import { excludedRegionDocument, resolveRegion } from '@/lib/region';
 import {
   canWriteSharedNamespace,
   readableSessions,
@@ -15,6 +16,7 @@ export async function GET(req: NextRequest) {
   try {
     const sessionId = requireSessionId(req);
     const trusted = isTrustedOrigin(req);
+    const region = resolveRegion(req);
 
     const { data, error } = await supabase()
       .from('documents')
@@ -26,12 +28,20 @@ export async function GET(req: NextRequest) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+    // The other region's availability edition is hidden from the sidebar for the
+    // same reason it is hidden from retrieval — a visitor in Chennai should not
+    // see a document called "Dubai Relocation and Availability" listed as part of
+    // Kannan's profile. Scoped to the preloaded namespace so a visitor's own
+    // upload is never hidden from them.
+    const excluded = excludedRegionDocument(region);
+
     // Preloaded documents sort last so the visitor's own uploads stay on top.
     const documents = (data ?? [])
       .map(({ session_id, ...doc }) => ({ ...doc, is_public: session_id === SEED_SESSION_ID }))
+      .filter((doc) => !(doc.is_public && doc.filename === excluded))
       .sort((first, second) => Number(first.is_public) - Number(second.is_public));
 
-    return NextResponse.json({ documents, trusted });
+    return NextResponse.json({ documents, trusted, region });
   } catch (error) {
     if (error instanceof SessionError) {
       return NextResponse.json({ error: error.message }, { status: 400 });

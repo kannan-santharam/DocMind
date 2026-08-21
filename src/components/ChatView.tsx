@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import type { Region } from '@/lib/region';
 import { EmptyState } from './EmptyState';
 import { Message } from './Message';
 import type { ChatMessage } from '@/lib/types';
@@ -10,6 +11,7 @@ export function ChatView({
   isStreaming,
   hasDocuments,
   onlyPreloaded,
+  region,
   documentsLoaded,
   onPickPrompt,
 }: {
@@ -17,6 +19,7 @@ export function ChatView({
   isStreaming: boolean;
   hasDocuments: boolean;
   onlyPreloaded: boolean;
+  region: Region;
   /** False until the document list has arrived from the server. */
   documentsLoaded: boolean;
   onPickPrompt: (prompt: string) => void;
@@ -55,6 +58,7 @@ export function ChatView({
             <EmptyState
               hasDocuments={hasDocuments}
               onlyPreloaded={onlyPreloaded}
+              region={region}
               onPick={onPickPrompt}
             />
           )}

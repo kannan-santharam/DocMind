@@ -2,6 +2,7 @@
 
 import type { ChatSettings } from './settings';
 import type { ChatStreamEvent, DocumentRecord } from './types';
+import { DEFAULT_REGION, type Region } from './region';
 
 const SESSION_KEY = 'docmind-session-id';
 
@@ -45,8 +46,30 @@ function embedOrigin(): string {
   return window.location.origin;
 }
 
+/**
+ * A `?region=in` in this page's own URL, forwarded so the server can honour it.
+ *
+ * The server normally decides region from `x-vercel-ip-country`, which does not
+ * exist on a dev server and cannot be changed to test a deploy — without this
+ * the India path would be unreachable and therefore unverifiable. It also lets
+ * the portfolio forward its own `/ind` choice by framing `…/?region=in`.
+ *
+ * Forgeable, and that is fine: both editions of the profile are already public
+ * on the portfolio, so there is nothing here to protect. See `lib/region.ts`.
+ */
+function regionOverride(): string {
+  if (typeof window === 'undefined') return '';
+  return new URLSearchParams(window.location.search).get('region') ?? '';
+}
+
 function sessionHeaders(sessionId: string): HeadersInit {
-  return { 'x-session-id': sessionId, 'x-embed-origin': embedOrigin() };
+  const headers: Record<string, string> = {
+    'x-session-id': sessionId,
+    'x-embed-origin': embedOrigin(),
+  };
+  const region = regionOverride();
+  if (region) headers['x-region-override'] = region;
+  return headers;
 }
 
 async function unwrap<T>(response: Response): Promise<T> {
@@ -61,12 +84,19 @@ export interface DocumentList {
   documents: DocumentRecord[];
   /** True when this origin is trusted, so the preloaded documents are in scope. */
   trusted: boolean;
+  /**
+   * Which edition of the profile this visitor is being shown. Carried on the
+   * same response as `trusted` rather than through a second endpoint, because
+   * the landing copy needs both before it renders and they are answers to the
+   * same question: what should this particular visitor be told?
+   */
+  region: Region;
 }
 
 export async function fetchDocuments(sessionId: string): Promise<DocumentList> {
   const response = await fetch('/api/documents', { headers: sessionHeaders(sessionId) });
-  const { documents, trusted } = await unwrap<DocumentList>(response);
-  return { documents, trusted: Boolean(trusted) };
+  const { documents, trusted, region } = await unwrap<DocumentList>(response);
+  return { documents, trusted: Boolean(trusted), region: region ?? DEFAULT_REGION };
 }
 
 export async function deleteDocument(sessionId: string, id?: string): Promise<void> {

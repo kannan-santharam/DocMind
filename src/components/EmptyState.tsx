@@ -2,6 +2,8 @@
 
 import { FileUp, Search, Sparkles, Split } from 'lucide-react';
 
+import type { Region } from '@/lib/region';
+
 const PIPELINE = [
   { icon: FileUp, title: 'Parse', body: 'PDF, DOCX, Markdown or pasted text — extracted server-side.' },
   { icon: Split, title: 'Chunk & embed', body: 'Heading-aware passages, 768-dim Gemini embeddings in pgvector.' },
@@ -29,20 +31,45 @@ const STARTERS = [
  * professional profile produce a poor first impression, so these are the
  * questions a recruiter would actually ask, plus one about the system itself.
  */
-const PROJECT_STARTERS = [
-  "What is Kannan's experience with AI and agentic engineering?",
-  'How did he cut build times by 96%, and what did it involve?',
-  "What is Kannan's Dubai relocation, visa status and notice period?",
-  'How was this chatbot built, and why those architecture decisions?',
-];
+const PROJECT_STARTERS: Record<Region, string[]> = {
+  dubai: [
+    "What is Kannan's experience with AI and agentic engineering?",
+    'How did he cut build times by 96%, and what did it involve?',
+    "What is Kannan's Dubai relocation, visa status and notice period?",
+    'How was this chatbot built, and why those architecture decisions?',
+  ],
+  india: [
+    "What is Kannan's experience with AI and agentic engineering?",
+    'How did he cut build times by 96%, and what did it involve?',
+    "Where is Kannan based, and what is his notice period?",
+    'How was this chatbot built, and why those architecture decisions?',
+  ],
+};
+
+/**
+ * The one sentence of framing a recruiter reads before asking anything.
+ *
+ * Region-aware for the same reason retrieval is: a recruiter in Chennai being
+ * greeted with "relocating to Dubai" has already been told this page is not for
+ * them, and no amount of careful answering afterwards undoes that. The server
+ * decides which one applies and sends it down with the document list.
+ */
+const PROJECT_INTRO: Record<Region, string> = {
+  dubai:
+    'Kannan Santharam is a Senior Lead Software Engineer with 10.5+ years of experience, relocating to Dubai.',
+  india:
+    'Kannan Santharam is a Senior Lead Software Engineer with 10.5+ years of experience, based in Chennai, India.',
+};
 
 export function EmptyState({
   hasDocuments,
   onlyPreloaded,
+  region,
   onPick,
 }: {
   hasDocuments: boolean;
   onlyPreloaded: boolean;
+  region: Region;
   onPick: (prompt: string) => void;
 }) {
   return (
@@ -57,7 +84,7 @@ export function EmptyState({
       </h2>
       <p className="mt-2 max-w-lg text-sm leading-relaxed text-[var(--text-sub)]">
         {onlyPreloaded
-          ? "Kannan Santharam is a Senior Lead Software Engineer with 10.5+ years of experience, relocating to Dubai. His full profile, skills and career history are indexed here — ask anything and every answer cites the passage it came from. The write-up of how this system was built is indexed too, so you can interrogate the engineering as well as the engineer."
+          ? `${PROJECT_INTRO[region]} His full profile, skills and career history are indexed here — ask anything and every answer cites the passage it came from. The write-up of how this system was built is indexed too, so you can interrogate the engineering as well as the engineer.`
           : hasDocuments
             ? 'Your knowledge base is indexed. The agent decides when to retrieve, searches again when results are weak, and cites every passage it used.'
             : 'Upload a PDF, DOCX, Markdown file or paste text to build a knowledge base. Answers come only from what you provide — nothing else.'}
@@ -65,7 +92,7 @@ export function EmptyState({
 
       {hasDocuments ? (
         <div className="mt-7 grid w-full gap-2 sm:grid-cols-2">
-          {(onlyPreloaded ? PROJECT_STARTERS : STARTERS).map((prompt) => (
+          {(onlyPreloaded ? PROJECT_STARTERS[region] : STARTERS).map((prompt) => (
             <button
               key={prompt}
               type="button"

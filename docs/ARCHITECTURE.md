@@ -655,6 +655,89 @@ about which: the origin comes from the browser and could be forged, and the same
 are published on the portfolio regardless. What it prevents is casual scraping of a
 public endpoint, which is the threat that actually exists.
 
+## Why does the answer change depending on which country the visitor is in?
+
+Kannan's portfolio has shipped two editions of his profile for a while: a Dubai one by
+default, and an India one when the visitor is geolocated in India or arrives via `/ind`.
+A recruiter in Chennai reading "requires UAE employment visa sponsorship" is reading a
+document that was clearly not written for them. DocMind mirrors the same split.
+
+**This is deliberately a second, independent signal — not an extension of the origin
+trust described above.** The two answer different questions:
+
+| | question it answers | source | consequence |
+|---|---|---|---|
+| Trust | *May* this visitor see the preloaded profile and the contact details in it? | `x-embed-origin` vs an allowlist | empty app, or Kannan's assistant |
+| Region | *Which* availability story is the honest one for them? | `x-vercel-ip-country` | Dubai relocation, or Chennai-based |
+
+Collapsing them into one flag would be a bug with a plausible-sounding rationale. An
+Indian recruiter arriving through the portfolio iframe is **trusted** — they get the
+phone number — and **Indian** — they should never see the Dubai framing. Both checks run,
+and neither implies the other.
+
+### Why the corpus was split rather than the prompt patched
+
+The first instinct is a line in the system instruction: *do not mention Dubai*. That
+fails for exactly the reason the contact-detail rule fails, and it is the same lesson
+twice — retrieved passages are rendered in the citation panel. A perfectly obedient model
+that never types the word "Dubai" still leaves a card on screen headed *"Is Kannan
+available to relocate to Dubai, and what is his visa status?"*, quoting the visa text
+verbatim. The prompt cannot reach that panel.
+
+The second instinct is redaction, reusing the machinery that removes phone numbers. That
+is wrong here too, but for a different reason: a phone number is a token inside otherwise
+neutral prose, so cutting it out leaves a readable sentence. Region framing is *the whole
+paragraph*. Redacting it word by word produces mangled text and a model trying to answer
+from it.
+
+So the preloaded profile was **partitioned instead**. Everything region-specific moved out
+of the shared profile into two small edition documents, and the shared profile became
+genuinely neutral:
+
+```
+docs/seed/
+  Kannan Santharam — Professional Profile.md          ← neutral: experience, achievements
+  Kannan Santharam — Skills and Proficiency.md        ← neutral
+  Kannan Santharam — Dubai Relocation and Availability.md
+  Kannan Santharam — India Availability.md
+```
+
+Retrieval then drops the edition that does not apply, in `runSearch`, **before**
+`addCitations` builds the panel — one filter covering both what the model reads and what
+the visitor sees. `list_sections` and the sidebar apply the same exclusion, or the wrong
+edition would stay unsearchable while still announcing itself by name.
+
+Two details that are easy to get wrong:
+
+- **The filter is scoped to the shared namespace only.** Matching on content instead
+  would catch a recruiter's own uploaded job description for a Dubai role and silently
+  drop it — the same class of failure as the reserved-slot bug, where the agent insisted
+  a document it had indexed did not exist.
+- **It keys off exact filenames**, and `scripts/verify.mjs` asserts those filenames still
+  exist in `docs/seed/`. Renaming a seed file would otherwise break the filter silently:
+  it would match nothing, and India visitors would quietly start seeing the Dubai edition
+  again. A filter that fails open is worse than no filter, because nobody looks at it.
+
+The system instruction still gets an India-specific block, but it is a backstop rather
+than the mechanism — it exists because the model has its own idea of what a "relocation"
+answer sounds like, and because a stray mention can arrive through conversation history
+rather than through a passage.
+
+### Testing something you cannot be in two places for
+
+`x-vercel-ip-country` does not exist on a dev server, and no developer can change which
+country they are in to check a deploy. Without an escape hatch the India path would be
+unreachable and therefore unverifiable. So the client forwards a `?region=in` from its own
+URL as `x-region-override`, which takes precedence over the header, and the resolved
+region is written to every Langfuse trace beside `origin` — the only way to confirm the
+geo header genuinely arrives in production rather than assuming it does.
+
+That override is trivially forgeable, and unlike the trust signal, that costs nothing:
+both editions are already public on the portfolio. Region is editorial, not protective, so
+a signed token would be effort spent guarding something that is not a secret. It also
+gives the portfolio a clean way to forward its own `/ind` choice — frame
+`…/?region=in` and the iframe agrees with the page around it.
+
 ## What are the honest limitations of this system?
 
 **No image or diagram understanding.** Text only. Charts, screenshots and diagrams in a
