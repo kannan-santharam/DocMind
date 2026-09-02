@@ -5,6 +5,7 @@ import type { ChatStreamEvent, DocumentRecord } from './types';
 import { DEFAULT_REGION, type Region } from './region';
 
 const SESSION_KEY = 'docmind-session-id';
+const API_KEY_KEY = 'docmind-gemini-key';
 
 /**
  * The session id namespaces every row this visitor creates. Generated client-side
@@ -47,6 +48,39 @@ function embedOrigin(): string {
 }
 
 /**
+ * The visitor's own Gemini key, when they have supplied one.
+ *
+ * localStorage rather than a cookie: a cookie is attached to every request the
+ * browser makes to this origin, including ones that have no business carrying a
+ * credential, and it would survive into places this app does not control. Here
+ * the key is read explicitly, attached to the three routes that need it, and
+ * removable by the visitor at any time.
+ *
+ * It is deliberately not tied to the session id. Clearing the session throws away
+ * uploaded documents; there is no reason that should also throw away the key and
+ * make them fetch it from AI Studio again.
+ */
+export function getStoredApiKey(): string {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem(API_KEY_KEY) ?? '';
+}
+
+export function storeApiKey(key: string): void {
+  localStorage.setItem(API_KEY_KEY, key.trim());
+}
+
+export function clearStoredApiKey(): void {
+  localStorage.removeItem(API_KEY_KEY);
+}
+
+/**
+ * Raised when a request needs the visitor's own key and did not have a working
+ * one. Distinct from a generic failure so the UI can open the setup panel rather
+ * than render a sentence about a 401.
+ */
+export class ApiKeyNeededError extends Error {}
+
+/**
  * A `?region=in` in this page's own URL, forwarded so the server can honour it.
  *
  * The server normally decides region from `x-vercel-ip-country`, which does not
@@ -62,7 +96,7 @@ function regionOverride(): string {
   return new URLSearchParams(window.location.search).get('region') ?? '';
 }
 
-function sessionHeaders(sessionId: string): HeadersInit {
+function sessionHeaders(sessionId: string): Record<string, string> {
   const headers: Record<string, string> = {
     'x-session-id': sessionId,
     'x-embed-origin': embedOrigin(),
@@ -72,12 +106,57 @@ function sessionHeaders(sessionId: string): HeadersInit {
   return headers;
 }
 
+/**
+ * Session headers plus the visitor's key, for the two routes that actually spend
+ * Gemini quota.
+ *
+ * Kept separate from `sessionHeaders` on purpose. Attaching the key at the single
+ * chokepoint would have been less code and would have sent someone else's
+ * credential along with every document listing and every delete — requests that
+ * have no use for it. A credential should travel exactly as far as it is needed
+ * and no further, and the panel tells visitors it is "sent with each question",
+ * which should be true rather than approximately true.
+ */
+function keyedHeaders(sessionId: string): Record<string, string> {
+  const headers = { ...sessionHeaders(sessionId) };
+  const apiKey = getStoredApiKey();
+  if (apiKey) headers['x-gemini-key'] = apiKey;
+  return headers;
+}
+
 async function unwrap<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error((payload as { error?: string }).error ?? `Request failed (${response.status}).`);
+    throw toError(payload, response.status, 'Request failed');
   }
   return payload as T;
+}
+
+function toError(payload: unknown, status: number, fallback: string): Error {
+  const { error, needsKey } = (payload ?? {}) as { error?: string; needsKey?: boolean };
+  const message = error ?? `${fallback} (${status}).`;
+  return needsKey ? new ApiKeyNeededError(message) : new Error(message);
+}
+
+export interface KeyCheck {
+  valid: boolean;
+  error?: string;
+}
+
+/**
+ * Asks the server to confirm a key works before it is stored, so a bad paste is
+ * caught at the point it was made rather than by the next question failing.
+ */
+export async function checkApiKey(sessionId: string, key: string): Promise<KeyCheck> {
+  const response = await fetch('/api/key/check', {
+    method: 'POST',
+    headers: { 'x-session-id': sessionId, 'x-gemini-key': key.trim() },
+  });
+  const payload = (await response.json().catch(() => ({}))) as KeyCheck;
+  if (!response.ok && payload.valid === undefined) {
+    return { valid: false, error: payload.error ?? `Could not check the key (${response.status}).` };
+  }
+  return payload;
 }
 
 export interface DocumentList {
@@ -117,7 +196,7 @@ export async function uploadFile(sessionId: string, file: File): Promise<IngestR
   form.append('file', file);
   const response = await fetch('/api/ingest', {
     method: 'POST',
-    headers: sessionHeaders(sessionId),
+    headers: keyedHeaders(sessionId),
     body: form,
   });
   const { document, notes } = await unwrap<IngestResult>(response);
@@ -131,7 +210,7 @@ export async function ingestText(
 ): Promise<IngestResult> {
   const response = await fetch('/api/ingest', {
     method: 'POST',
-    headers: { ...sessionHeaders(sessionId), 'Content-Type': 'application/json' },
+    headers: { ...keyedHeaders(sessionId), 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, title }),
   });
   const { document, notes } = await unwrap<IngestResult>(response);
@@ -152,14 +231,14 @@ export async function* streamChat(
 ): AsyncGenerator<ChatStreamEvent> {
   const response = await fetch('/api/chat', {
     method: 'POST',
-    headers: { ...sessionHeaders(sessionId), 'Content-Type': 'application/json' },
+    headers: { ...keyedHeaders(sessionId), 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, settings }),
     signal,
   });
 
   if (!response.ok || !response.body) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error((payload as { error?: string }).error ?? `Chat failed (${response.status}).`);
+    throw toError(payload, response.status, 'Chat failed');
   }
 
   const reader = response.body.getReader();

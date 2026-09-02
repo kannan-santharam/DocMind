@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { streamChat } from '@/lib/client';
+import { ApiKeyNeededError, streamChat } from '@/lib/client';
 import { DEFAULT_SETTINGS, type ChatSettings } from '@/lib/settings';
 import type { ChatMessage, TraceStep } from '@/lib/types';
 
@@ -14,7 +14,17 @@ function mergeTrace(trace: TraceStep[] | undefined, step: TraceStep): TraceStep[
   return next;
 }
 
-export function useChat(sessionId: string, settings: ChatSettings = DEFAULT_SETTINGS) {
+export function useChat(
+  sessionId: string,
+  settings: ChatSettings = DEFAULT_SETTINGS,
+  /**
+   * Called when the server refuses the request for want of a working key —
+   * typically a key that was valid when it was saved and has since been revoked.
+   * The message still lands in the transcript; this is what reopens the setup
+   * panel so the fix is one paste away rather than a puzzle.
+   */
+  onKeyRequired?: (message: string) => void,
+) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -86,6 +96,7 @@ export function useChat(sessionId: string, settings: ChatSettings = DEFAULT_SETT
           }
         }
       } catch (cause) {
+        if (cause instanceof ApiKeyNeededError) onKeyRequired?.(cause.message);
         if ((cause as Error)?.name !== 'AbortError') {
           patchLast((m) => ({
             ...m,
@@ -106,7 +117,7 @@ export function useChat(sessionId: string, settings: ChatSettings = DEFAULT_SETT
         );
       }
     },
-    [isStreaming, messages, patchLast, sessionId, settings],
+    [isStreaming, messages, onKeyRequired, patchLast, sessionId, settings],
   );
 
   const stop = useCallback(() => abortRef.current?.abort(), []);

@@ -54,7 +54,7 @@ export interface RateLimitVerdict {
  */
 export async function checkRateLimit(
   identity: string,
-  bucket: 'chat' | 'ingest',
+  bucket: keyof typeof LIMITS,
   windowSecs: number,
   limit: number,
 ): Promise<RateLimitVerdict> {
@@ -80,4 +80,10 @@ export async function checkRateLimit(
 export const LIMITS = {
   chat: { windowSecs: 600, max: 25 },
   ingest: { windowSecs: 3600, max: 10 },
+  /**
+   * Key validation. Generous for anyone genuinely pasting a key and correcting a
+   * typo, tight enough that the route is not a free oracle for testing stolen
+   * keys in bulk against Google.
+   */
+  keyCheck: { windowSecs: 600, max: 12 },
 } as const;

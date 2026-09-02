@@ -1,4 +1,5 @@
 import { Langfuse } from 'langfuse';
+import { redactApiKeysDeep } from './privacy';
 
 /**
  * Langfuse tracing.
@@ -86,6 +87,24 @@ const NOOP_TRACE: Trace = {
 };
 
 /**
+ * Everything leaving for Langfuse passes through here first.
+ *
+ * The credential itself never reaches a trace — only `keySource` does. But the
+ * *content* channels carry text the visitor typed and text retrieved from
+ * documents they uploaded, and a key can arrive through either: pasted into the
+ * chat box by someone who missed the key panel, or sitting in a config snippet
+ * inside an uploaded file that retrieval then feeds back into the model input.
+ *
+ * Scrubbing at this one boundary rather than at each of a dozen call sites is the
+ * point. A rule applied per call site is a rule that the next call site forgets,
+ * and the promise shown to visitors — never stored, never traced — has to hold for
+ * the whole surface, not just the header it was designed around.
+ */
+function scrub<T>(value: T): T {
+  return redactApiKeysDeep(value);
+}
+
+/**
  * Opens a trace for one unit of work.
  *
  * `sessionId` is the visitor's session, so Langfuse groups a whole conversation
@@ -106,8 +125,8 @@ export function startTrace(body: {
     const trace = lf.trace({
       name: TRACE_NAME,
       sessionId: body.sessionId,
-      input: body.input,
-      metadata: { operation: body.name, ...body.metadata },
+      input: scrub(body.input),
+      metadata: scrub({ operation: body.name, ...body.metadata }),
       tags: [body.name, ...(body.tags ?? [])],
     });
 
@@ -117,7 +136,7 @@ export function startTrace(body: {
           const observation = trace.generation({
             name: gen.name,
             model: gen.model,
-            input: gen.input,
+            input: scrub(gen.input),
             modelParameters: gen.modelParameters,
           });
           return {
@@ -125,10 +144,10 @@ export function startTrace(body: {
               try {
                 observation.end({
                   model: result.model,
-                  output: result.output,
+                  output: scrub(result.output),
                   usage: result.usage,
                   level: result.level,
-                  statusMessage: result.statusMessage,
+                  statusMessage: scrub(result.statusMessage),
                 });
               } catch {
                 /* tracing must never break a request */
@@ -142,11 +161,11 @@ export function startTrace(body: {
 
       span(spanBody) {
         try {
-          const observation = trace.span(spanBody);
+          const observation = trace.span(scrub(spanBody));
           return {
             end(result) {
               try {
-                observation.end(result);
+                observation.end(scrub(result));
               } catch {
                 /* ignored */
               }
@@ -159,7 +178,7 @@ export function startTrace(body: {
 
       update(update) {
         try {
-          trace.update(update);
+          trace.update(scrub(update));
         } catch {
           /* ignored */
         }

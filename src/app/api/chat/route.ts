@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { runAgent } from '@/lib/agent';
+import { ApiKeyRequiredError, resolveApiKey } from '@/lib/apiKey';
 import type { GeminiContent } from '@/lib/gemini';
 import { resolveModels } from '@/lib/models';
 import { checkRateLimit, LIMITS, rateLimitIdentity } from '@/lib/rateLimit';
@@ -49,6 +50,20 @@ export async function POST(req: NextRequest) {
   const trusted = isTrustedOrigin(req);
   const region = resolveRegion(req);
 
+  // Whose quota answers this. Through the portfolio it is Kannan's key; at the
+  // public URL the visitor supplies their own, because one free-tier key cannot
+  // absorb an unbounded audience. A missing key is not an error to display raw —
+  // `needsKey` is what makes the client show the setup panel instead.
+  let credential;
+  try {
+    credential = resolveApiKey(req);
+  } catch (error) {
+    if (error instanceof ApiKeyRequiredError) {
+      return NextResponse.json({ error: error.message, needsKey: true }, { status: 401 });
+    }
+    throw error;
+  }
+
   if (!messages.length || messages[messages.length - 1]?.role !== 'user') {
     return NextResponse.json(
       { error: 'The last message must come from the user.' },
@@ -65,7 +80,13 @@ export async function POST(req: NextRequest) {
   if (!limit.allowed) {
     return NextResponse.json(
       {
-        error: `Message limit reached (${LIMITS.chat.max} per 10 minutes). This is a public demo running on a free Gemini tier — it resets at ${limit.resetsAt}.`,
+        // Deliberately not phrased as a Gemini quota. On a visitor's own key this
+        // is purely this demo's own request cap, and blaming the free tier would
+        // send them looking at the wrong dashboard.
+        error:
+          credential.source === 'visitor'
+            ? `Message limit reached (${LIMITS.chat.max} per 10 minutes). That is this demo's own cap on requests it will serve, not a limit on your Gemini key — it resets at ${limit.resetsAt}.`
+            : `Message limit reached (${LIMITS.chat.max} per 10 minutes). This is a public demo running on a free Gemini tier — it resets at ${limit.resetsAt}.`,
       },
       { status: 429 },
     );
@@ -103,6 +124,8 @@ export async function POST(req: NextRequest) {
       maxTurns: settings.maxTurns,
       historyTurns: history.length,
       origin: trusted ? 'portfolio' : 'direct',
+      // Whose quota served the answer. The key itself is never traced.
+      keySource: credential.source,
       // On the trace so it is possible to confirm the geo header actually
       // arrives in production, which is otherwise untestable from here.
       region,
@@ -132,6 +155,7 @@ export async function POST(req: NextRequest) {
           trace,
           trusted,
           region,
+          credential,
         });
         emit({ type: 'done' });
       } catch (error) {
