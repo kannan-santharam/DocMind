@@ -27,7 +27,24 @@ const nextConfig: NextConfig = {
           // Clickjacking: only the portfolio may frame this. Note a third-party
           // frame would report its own origin and land in restricted mode
           // anyway, so this is defence in depth rather than the primary control.
-          { key: 'Content-Security-Policy', value: `frame-ancestors ${frameAncestors()}` },
+          /**
+           * Two directives, for two different threats.
+           *
+           * `frame-ancestors` is clickjacking. `connect-src 'self'` is about the
+           * visitor's Gemini key: it can only ever reach this app's own server,
+           * and that is now enforced by the browser rather than merely true
+           * because every fetch in the source happens to be a relative path. If a
+           * script-injection primitive ever appeared, the key still could not be
+           * POSTed to somebody else's host.
+           *
+           * Only `connect-src` is narrowed. Google Fonts arrives via an @import in
+           * globals.css, which is style-src and font-src, so it is unaffected — a
+           * full `default-src` lockdown would break it and buys nothing here.
+           */
+          {
+            key: 'Content-Security-Policy',
+            value: `frame-ancestors ${frameAncestors()}; connect-src 'self'`,
+          },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'X-DNS-Prefetch-Control', value: 'off' },

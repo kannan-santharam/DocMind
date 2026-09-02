@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
+  ApiKeyNeededError,
   deleteDocument,
   fetchDocuments,
   ingestText,
@@ -15,7 +16,11 @@ export interface UploadState {
   stage: 'parsing' | 'embedding';
 }
 
-export function useDocuments(sessionId: string) {
+export function useDocuments(
+  sessionId: string,
+  /** See the same parameter on `useChat` — uploads need the key just as answers do. */
+  onKeyRequired?: (message: string) => void,
+) {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [uploading, setUploading] = useState<UploadState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,13 +74,14 @@ export function useDocuments(sessionId: string) {
         setNotices(result.notes);
         return result.document;
       } catch (cause) {
+        if (cause instanceof ApiKeyNeededError) onKeyRequired?.(cause.message);
         setError(cause instanceof Error ? cause.message : 'Upload failed.');
       } finally {
         clearTimeout(toEmbedding);
         setUploading(null);
       }
     },
-    [sessionId],
+    [onKeyRequired, sessionId],
   );
 
   const remove = useCallback(

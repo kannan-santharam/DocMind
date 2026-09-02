@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { FileText, Menu, Trash2 } from 'lucide-react';
+import { ApiKeyPanel } from '@/components/ApiKeyPanel';
 import { ChatView } from '@/components/ChatView';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Composer } from '@/components/Composer';
@@ -9,7 +10,13 @@ import { SettingsPanel } from '@/components/SettingsPanel';
 import { Sidebar } from '@/components/Sidebar';
 import { useChat } from '@/hooks/useChat';
 import { useDocuments } from '@/hooks/useDocuments';
-import { deleteDocument, getSessionId, resetSessionId } from '@/lib/client';
+import {
+  clearStoredApiKey,
+  deleteDocument,
+  getSessionId,
+  getStoredApiKey,
+  resetSessionId,
+} from '@/lib/client';
 import type { ModelInfo } from '@/lib/models';
 import {
   DEFAULT_SETTINGS,
@@ -35,9 +42,19 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
   const [confirmNewSession, setConfirmNewSession] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [settings, setSettings] = useState<ChatSettings>(DEFAULT_SETTINGS);
+  /**
+   * The visitor's own Gemini key, when the public URL requires one. Empty string
+   * means "none stored"; `keyRejected` carries the server's explanation when a
+   * previously working key has stopped working.
+   */
+  const [apiKey, setApiKey] = useState('');
+  const [keyRejected, setKeyRejected] = useState<string | null>(null);
+  /** Set when the visitor reopens the panel to replace a key that still works. */
+  const [editingKey, setEditingKey] = useState(false);
 
   useEffect(() => {
     setSessionId(getSessionId());
+    setApiKey(getStoredApiKey());
 
     // Restored through the same clamp the server applies, so a stale or
     // hand-edited localStorage value cannot express an invalid setting.
@@ -68,8 +85,20 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
     }
   }, []);
 
-  const docs = useDocuments(sessionId);
-  const chat = useChat(sessionId, settings);
+  /**
+   * A key that was accepted can still be revoked in AI Studio later. When the
+   * server says a request needs a working key, drop the stored one and show the
+   * panel with the reason — otherwise every question fails identically and the
+   * cause is invisible.
+   */
+  const onKeyRequired = useCallback((message: string) => {
+    clearStoredApiKey();
+    setApiKey('');
+    setKeyRejected(message);
+  }, []);
+
+  const docs = useDocuments(sessionId, onKeyRequired);
+  const chat = useChat(sessionId, settings, onKeyRequired);
 
   /** Uploads this visitor owns — the preloaded documents are not theirs to lose. */
   const ownedDocuments = docs.documents.filter((doc) => !doc.is_public);
@@ -115,6 +144,26 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
 
   const configWarning = setup && !setup.configured;
 
+  /**
+   * Whose quota this visitor is spending. Trust is the same signal that gates the
+   * preloaded documents: through the portfolio the app runs on the owner's key, so
+   * a recruiter is never asked for a credential. Gated on `docs.loaded` so the
+   * panel does not flash before the answer is known.
+   */
+  const needsOwnKey = docs.loaded && !docs.trusted && !apiKey;
+  const showKeyPanel = needsOwnKey || editingKey;
+
+  /**
+   * Whether the visitor's own key is the one actually paying for answers.
+   *
+   * Not the same as "a key is stored". Someone who used the public URL once keeps
+   * their key in localStorage, and if they later arrive through the portfolio the
+   * owner's key serves them instead — so the sidebar must not offer to manage a
+   * credential that is sitting idle, and the composer must not make promises about
+   * a key that is not in the request.
+   */
+  const ownKeyInUse = !docs.trusted && Boolean(apiKey);
+
   // Only non-default retrieval settings are surfaced. A badge that is always on
   // says nothing; one that appears only when something is tuned is a real signal.
   const settingsSummary =
@@ -137,6 +186,18 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
           notices={docs.notices}
           onDismissNotices={docs.dismissNotices}
           trusted={docs.trusted}
+          apiKey={ownKeyInUse ? apiKey : undefined}
+          onChangeKey={() => {
+            setEditingKey(true);
+            setSidebarOpen(false);
+          }}
+          onRemoveKey={() => {
+            clearStoredApiKey();
+            setApiKey('');
+            setKeyRejected(null);
+            setEditingKey(false);
+            setSidebarOpen(false);
+          }}
           onFile={(file) => void docs.ingest(file)}
           onText={(text, title) => void docs.ingest({ text, title })}
           onDelete={(id) => void docs.remove(id)}
@@ -162,6 +223,18 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
               notices={docs.notices}
               onDismissNotices={docs.dismissNotices}
               trusted={docs.trusted}
+              apiKey={ownKeyInUse ? apiKey : undefined}
+              onChangeKey={() => {
+                setEditingKey(true);
+                setSidebarOpen(false);
+              }}
+              onRemoveKey={() => {
+                clearStoredApiKey();
+                setApiKey('');
+                setKeyRejected(null);
+                setEditingKey(false);
+                setSidebarOpen(false);
+              }}
               onFile={(file) => void docs.ingest(file)}
               onText={(text, title) => void docs.ingest({ text, title })}
               onDelete={(id) => void docs.remove(id)}
@@ -217,6 +290,20 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
           </div>
         )}
 
+        {showKeyPanel ? (
+          <div className="flex-1 overflow-y-auto">
+            <ApiKeyPanel
+              sessionId={sessionId}
+              reason={keyRejected}
+              onSaved={(key) => {
+                setApiKey(key);
+                setKeyRejected(null);
+                setEditingKey(false);
+              }}
+              onCancel={editingKey && apiKey ? () => setEditingKey(false) : undefined}
+            />
+          </div>
+        ) : (
         <ChatView
           messages={chat.messages}
           isStreaming={chat.isStreaming}
@@ -226,6 +313,7 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
           documentsLoaded={docs.loaded}
           onPickPrompt={(prompt) => submit(prompt)}
         />
+        )}
 
         <Composer
           value={input}
@@ -233,9 +321,11 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
           onSubmit={() => submit()}
           onStop={chat.stop}
           isStreaming={chat.isStreaming}
-          disabled={!sessionId || Boolean(configWarning)}
+          disabled={!sessionId || Boolean(configWarning) || showKeyPanel}
           placeholder={
-            docs.documents.length === 0
+            showKeyPanel
+              ? 'Add your Gemini API key to start…'
+              : docs.documents.length === 0
               ? 'Upload a document first, then ask about it…'
               : ownedDocuments.length > 0 || !docs.trusted
                 ? 'Ask about your documents…'
@@ -253,6 +343,7 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
            * showing the notice without needing a redeploy.
            */
           tracing={tracing || Boolean(setup?.tracing)}
+          ownKeyInUse={ownKeyInUse}
         />
         <ConfirmDialog
           open={confirmNewSession}

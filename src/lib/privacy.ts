@@ -52,6 +52,67 @@ export function redactContactDetails(text: string): string {
     .replace(PHONE, (match) => (looksLikePhone(match) ? REPLACEMENT : match));
 }
 
+/**
+ * Google API keys, as they appear in pasted text.
+ *
+ * Two formats, because Google issues both:
+ *
+ *   AIza…  legacy, `AIza` plus 35 characters, 39 in total
+ *   AQ.…   current, a short prefix, a dot, then a longer body — the key this
+ *          project's own AI Studio project was issued is 53 characters
+ *
+ * Assuming only the `AIza` shape was a real mistake worth recording: it is the
+ * format in every tutorial and every StackOverflow answer, and it silently misses
+ * keys minted today. Verified against a live key rather than trusted from memory.
+ *
+ * Still narrow on purpose. A generic "long random-looking token" rule would mangle
+ * documents full of hashes, commit ids and base64, and this exists to catch one
+ * specific accident: a visitor pasting a config file or a curl command containing
+ * their own key. Without it the key is chunked, embedded, and stored in `chunks`
+ * permanently — the one path by which a credential this app is careful never to
+ * persist ends up in Postgres anyway, put there by its owner.
+ */
+const GOOGLE_API_KEY = /\b(?:AIza[0-9A-Za-z_-]{35}|A[A-Za-z0-9]{1,3}\.[A-Za-z0-9_-]{30,120})\b/g;
+
+const KEY_REPLACEMENT = '[API key removed before indexing]';
+
+/**
+ * Applied to extracted text at ingest, before it is chunked or embedded, and to
+ * everything on its way to Langfuse.
+ *
+ * Two channels, one function, because a key can arrive through either: pasted
+ * into a document, or typed into the chat box by someone who has not spotted the
+ * key panel yet. The promise made to visitors — never stored, never traced — has
+ * to hold for both, not just for the header it was designed around.
+ */
+export function redactApiKeys(text: string): string {
+  return text.replace(GOOGLE_API_KEY, KEY_REPLACEMENT);
+}
+
+/**
+ * Deep-scrubs an arbitrary value on its way to a third-party observability sink.
+ *
+ * Only plain objects are rebuilt. Walking into a Date, Map or class instance with
+ * `Object.entries` would return an empty object and quietly destroy it — nothing
+ * currently traced is one of those, but a scrubber that silently eats a value it
+ * does not understand is a bad thing to leave lying in a hot path.
+ */
+export function redactApiKeysDeep<T>(value: T): T {
+  if (typeof value === 'string') return redactApiKeys(value) as unknown as T;
+  if (Array.isArray(value)) return value.map(redactApiKeysDeep) as unknown as T;
+
+  if (value && typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return value;
+
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, redactApiKeysDeep(v)]),
+    ) as unknown as T;
+  }
+
+  return value;
+}
+
 export function containsContactDetails(text: string): boolean {
   return redactContactDetails(text) !== text;
 }

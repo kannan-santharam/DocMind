@@ -738,6 +738,89 @@ a signed token would be effort spent guarding something that is not a secret. It
 gives the portfolio a clean way to forward its own `/ind` choice — frame
 `…/?region=in` and the iframe agrees with the page around it.
 
+## Who pays for the Gemini calls, and why does the public URL ask for a key?
+
+Two audiences, two answers. Through the portfolio the app runs on Kannan's key: a
+recruiter should never be asked to obtain a credential to read a CV. At the public URL
+every visitor brings their own, free from AI Studio.
+
+That is arithmetic, not policy. Embedding is the expensive half of a RAG application —
+the free tier allows on the order of 1000 embedding requests a day, and a single
+80-passage upload is 80 of them. Twelve visitors indexing documents is the whole day's
+allowance, and the allowance is shared with the portfolio embed, which is the one place
+the app actually needs to work. A demo whose headline feature stops functioning by
+mid-morning is worse than one that asks for a minute of setup.
+
+### The discriminator is not "is this origin trusted"
+
+The obvious implementation reuses the trust flag: trusted origins get the owner's key,
+everyone else brings their own. That breaks seeding, and it breaks it silently.
+
+`scripts/seed.mjs` authenticates with `x-seed-token` and never sends `x-embed-origin` —
+it is a script, not a browser, so there is no embedding origin to report. It is therefore
+**not** a trusted origin. Gate the owner's key on trust alone and every seed request
+401s, which means the shared corpus can never be rebuilt. This repo has already made that
+exact mistake once, in the other direction: the IP-based rate limiter counted seed uploads
+against a visitor budget and locked out seeding, fixed by exempting authorised
+shared-namespace writes. So the condition here is
+`isTrustedOrigin(req) || canWriteSharedNamespace(req)`, and the parameter is named
+`useOwnerKey` rather than `trusted` — the same discipline applied to keeping region and
+trust apart.
+
+### Handling a credential that is not yours
+
+Three concrete decisions, each of which would be easy to get wrong by default:
+
+**The key travels in a header, not a query string.** Both authenticate identically to
+Google, but `?key=…` is the part of a request that lands in access logs, proxy traces and
+error strings. Every call site moved to `x-goog-api-key`, including the validation route
+— the one endpoint whose entire job is handling someone else's credential is the worst
+possible place to leave a key in a URL.
+
+**Google's error bodies are never forwarded.** A rejected key is one bad paste from a
+valid one, and the upstream body can echo request details. The client gets a written
+explanation chosen by status code instead.
+
+**Validation costs the visitor nothing.** `GET /v1beta/models` authenticates the key and
+consumes no tokens and no embedding quota, so a typo is caught for free. The route is
+rate-limited anyway, because otherwise it is a free oracle for testing keys in bulk
+against Google.
+
+The key is never persisted server-side, never written to Postgres, and never attached to a
+Langfuse trace. Traces carry `keySource: 'owner' | 'visitor'` — enough to tell whose quota
+served an answer without recording whose credential it was.
+
+### Per-key quota accounting
+
+The in-process caches that make the free tier survivable were written when there was one
+key, and both were wrong the moment there were many.
+
+`exhaustedUntil` remembers which model is rate-limited so the cascade does not pay a
+wasted round trip to a dead model on every request. Keyed by model alone, the first
+visitor to exhaust their own daily quota would silently disable that model for every other
+visitor and for the portfolio — one person's spent allowance read as a global outage. It
+is now keyed `fingerprint:model`: still per-model, so the cascade works, but scoped to the
+key that actually ran out.
+
+The embedding rate gate has the mirror-image problem. It paces calls below the measured
+100/minute ceiling using a sliding window of timestamps; one shared window means two
+visitors on separate keys throttle each other for no reason. It is now a window per key,
+pruned to nothing when it empties so a warm instance does not accumulate an array per
+visitor it has ever served.
+
+The fingerprint is a truncated SHA-256 of the key. It partitions the caches without any
+part of the credential appearing in a map key that a heap dump might outlive.
+
+### One piece of copy that had to change
+
+The rate-limit message said *"This is a public demo running on a free Gemini tier — it
+resets at …"*. On a visitor's own key that is actively misleading: the cap being hit is
+this server's own request limit, and the message sends them to look at the wrong
+dashboard. It now branches on key source. The limit itself still applies to
+bring-your-own-key visitors, deliberately — it protects Supabase and the serverless
+function, which are still being paid for by this deployment regardless of whose Gemini
+quota answers the question.
+
 ## What are the honest limitations of this system?
 
 **No image or diagram understanding.** Text only. Charts, screenshots and diagrams in a

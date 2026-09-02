@@ -1,4 +1,11 @@
-import { embedQuery, streamTurn, type FunctionDeclaration, type GeminiContent, type GeminiPart } from './gemini';
+import {
+  embedQuery,
+  streamTurn,
+  type Credential,
+  type FunctionDeclaration,
+  type GeminiContent,
+  type GeminiPart,
+} from './gemini';
 import { redactContactDetails } from './privacy';
 import { DEFAULT_REGION, excludedRegionDocument, type Region } from './region';
 import { readableSessions, SEED_SESSION_ID } from './session';
@@ -113,6 +120,8 @@ interface AgentContext {
    * availability story it tells.
    */
   region: Region;
+  /** Whose Gemini quota this answer runs on — the owner's, or the visitor's own. */
+  credential: Credential;
   trace?: Trace;
   emit: (event: ChatStreamEvent) => void;
   /** Accumulates every cited passage across all searches in this answer. */
@@ -160,7 +169,7 @@ async function runSearch(context: AgentContext, args: Record<string, unknown>) {
   // A pinned top-k overrides whatever the model asked for; otherwise the model's
   // own choice stands, clamped so it cannot request nothing or overflow context.
   const k = context.settings.topK ?? Math.min(Math.max(Number(args.k) || 6, 1), 12);
-  const vector = toVectorLiteral(await embedQuery(query));
+  const vector = toVectorLiteral(await embedQuery(context.credential, query));
 
   // One search per readable namespace, in parallel, then merged and re-ranked.
   // Scores are comparable across the calls: same metric, same query vector.
@@ -325,6 +334,7 @@ export async function runAgent(options: {
   trace?: Trace;
   trusted?: boolean;
   region?: Region;
+  credential: Credential;
 }): Promise<void> {
   const { sessionId, history, emit, signal, models, trace } = options;
   const settings = options.settings ?? DEFAULT_SETTINGS;
@@ -335,6 +345,7 @@ export async function runAgent(options: {
     settings,
     trusted,
     region,
+    credential: options.credential,
     trace,
     emit,
     citations: [],
@@ -372,6 +383,7 @@ export async function runAgent(options: {
     let result: Awaited<ReturnType<typeof streamTurn>>;
     try {
       result = await streamTurn({
+        credential: options.credential,
         contents,
           systemInstruction: [
           SYSTEM_INSTRUCTION,

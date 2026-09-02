@@ -1,4 +1,3 @@
-import { env } from './env';
 import { CHAT_MODELS } from './models';
 
 const API_ROOT = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -47,12 +46,42 @@ export interface FunctionDeclaration {
 
 type EmbedTask = 'RETRIEVAL_DOCUMENT' | 'RETRIEVAL_QUERY';
 
-async function embedOnce(text: string, taskType: EmbedTask, title?: string) {
+/**
+ * The credential a call runs on, plus the label its quota is tracked under.
+ *
+ * Passed explicitly rather than read from the environment inside these functions,
+ * because at the public URL the key belongs to the visitor, not to this
+ * deployment. See `lib/apiKey.ts`.
+ */
+export interface Credential {
+  key: string;
+  fingerprint: string;
+}
+
+/**
+ * `x-goog-api-key` rather than `?key=`.
+ *
+ * Both authenticate identically, but a query string is the part of a request that
+ * ends up in access logs, error strings and proxy traces. When the key belongs to
+ * a visitor rather than to this deployment, keeping it out of the URL is the
+ * difference between handling someone's credential carefully and leaking it into
+ * infrastructure neither of us controls.
+ */
+function authHeaders(credential: Credential): Record<string, string> {
+  return { 'Content-Type': 'application/json', 'x-goog-api-key': credential.key };
+}
+
+async function embedOnce(
+  credential: Credential,
+  text: string,
+  taskType: EmbedTask,
+  title?: string,
+) {
   const res = await fetch(
-    `${API_ROOT}/${EMBED_MODEL}:embedContent?key=${env.geminiApiKey}`,
+    `${API_ROOT}/${EMBED_MODEL}:embedContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(credential),
       body: JSON.stringify({
         model: `models/${EMBED_MODEL}`,
         content: { parts: [{ text }] },
@@ -64,8 +93,18 @@ async function embedOnce(text: string, taskType: EmbedTask, title?: string) {
   );
 
   if (!res.ok) {
+    // Status and Google's own retry hint, not the raw body.
+    //
+    // This message reaches a client response and a Langfuse trace. An unbounded
+    // slice of a third party's error text is the wrong thing to forward into
+    // either: it can echo request details, and on a visitor's key those details
+    // are theirs, not ours. `retryDelayMs` still reads the wait from the body
+    // here, where it is in scope, so the useful part survives.
     const body = await res.text();
-    const err = new Error(`Embedding failed (${res.status}): ${body.slice(0, 300)}`);
+    const wait = retryDelayMs(body);
+    const err = new Error(
+      `Embedding failed (${res.status})${wait ? `; Google asked to retry in ${Math.ceil(wait / 1000)}s` : ''}.`,
+    );
     (err as Error & { status?: number }).status = res.status;
     throw err;
   }
@@ -105,16 +144,44 @@ export class QuotaExhaustedError extends Error {}
  * Without this, every request after a model exhausts its daily quota pays a
  * wasted round trip to that model before falling through. With three models in
  * the chain that is most of a second added to every answer, all day.
+ *
+ * Keyed by `fingerprint:model`, not by model. Gemini quotas are per project, so
+ * one visitor exhausting their own key says nothing about anyone else's — and a
+ * warm serverless instance is shared. Keyed by model alone, the first visitor to
+ * run out would silently disable that model for every other visitor and for the
+ * portfolio. Keyed by fingerprint alone, the per-model cascade stops working at
+ * all, which is the feature this map exists to serve.
  */
 const exhaustedUntil = new Map<string, number>();
 
-/** Timestamps of embedding calls started in the last minute, oldest first. */
-const recentEmbedCalls: number[] = [];
+/** Embedding call timestamps in the last minute, per key, oldest first. */
+const recentEmbedCalls = new Map<string, number[]>();
 
-function pruneWindow(now: number) {
-  while (recentEmbedCalls.length && now - recentEmbedCalls[0] >= RATE_WINDOW_MS) {
-    recentEmbedCalls.shift();
+/**
+ * Prune expired state and return the calling key's window.
+ *
+ * The sweep covers *every* entry, not just this one. Pruning only the caller's
+ * key is the obvious implementation and leaves the map growing forever: a visitor
+ * who uploads once and leaves keeps their array of timestamps for as long as the
+ * instance stays warm, because nothing ever calls in under their fingerprint
+ * again. Expired cooldowns get the same treatment for the same reason.
+ *
+ * Both maps hold at most one small entry per key seen in the last minute, so the
+ * sweep is over a handful of entries and runs before an embedding call that is
+ * about to cost a network round trip regardless.
+ */
+function pruneWindow(fingerprint: string, now: number): number[] {
+  for (const [key, calls] of recentEmbedCalls) {
+    while (calls.length && now - calls[0] >= RATE_WINDOW_MS) calls.shift();
+    if (!calls.length) recentEmbedCalls.delete(key);
   }
+  for (const [key, until] of exhaustedUntil) {
+    if (until <= now) exhaustedUntil.delete(key);
+  }
+
+  const calls = recentEmbedCalls.get(fingerprint) ?? [];
+  recentEmbedCalls.set(fingerprint, calls);
+  return calls;
 }
 
 /**
@@ -125,17 +192,18 @@ function pruneWindow(now: number) {
  * request past the function's own time limit — better a clear quota message than
  * a silent platform timeout.
  */
-async function reserveEmbedSlot(deadline: number | undefined) {
+async function reserveEmbedSlot(fingerprint: string, deadline: number | undefined) {
   for (;;) {
     const now = Date.now();
-    pruneWindow(now);
+    const calls = pruneWindow(fingerprint, now);
 
-    if (recentEmbedCalls.length < EMBED_RPM_BUDGET) {
-      recentEmbedCalls.push(now);
+    if (calls.length < EMBED_RPM_BUDGET) {
+      calls.push(now);
+      recentEmbedCalls.set(fingerprint, calls);
       return;
     }
 
-    const waitMs = RATE_WINDOW_MS - (now - recentEmbedCalls[0]) + 50;
+    const waitMs = RATE_WINDOW_MS - (now - calls[0]) + 50;
     if (deadline && now + waitMs > deadline) {
       throw new QuotaExhaustedError(
         `The free Gemini embedding tier allows ${EMBED_RPM_LIMIT} requests per minute and this key has just used them. Wait about ${Math.ceil(waitMs / 1000)}s and upload again.`,
@@ -185,8 +253,8 @@ async function withRetry<T>(
   throw lastError;
 }
 
-export function embedQuery(text: string): Promise<number[]> {
-  return withRetry(() => embedOnce(text, 'RETRIEVAL_QUERY')).then(l2Normalise);
+export function embedQuery(credential: Credential, text: string): Promise<number[]> {
+  return withRetry(() => embedOnce(credential, text, 'RETRIEVAL_QUERY')).then(l2Normalise);
 }
 
 /**
@@ -194,6 +262,7 @@ export function embedQuery(text: string): Promise<number[]> {
  * single calls with bounded concurrency behind the rate gate above.
  */
 export async function embedDocuments(
+  credential: Credential,
   texts: string[],
   {
     concurrency = 5,
@@ -207,9 +276,9 @@ export async function embedDocuments(
   async function worker() {
     while (cursor < texts.length) {
       const index = cursor++;
-      await reserveEmbedSlot(deadline);
+      await reserveEmbedSlot(credential.fingerprint, deadline);
       const vector = await withRetry(
-        () => embedOnce(texts[index], 'RETRIEVAL_DOCUMENT', title),
+        () => embedOnce(credential, texts[index], 'RETRIEVAL_DOCUMENT', title),
         { deadline },
       );
       out[index] = l2Normalise(vector);
@@ -225,6 +294,8 @@ export async function embedDocuments(
 // --- Streaming chat completion ------------------------------------------------
 
 export interface StreamTurnOptions {
+  /** Whose Gemini quota this turn runs on. */
+  credential: Credential;
   contents: GeminiContent[];
   systemInstruction: string;
   tools?: FunctionDeclaration[];
@@ -260,7 +331,7 @@ export interface StreamTurnResult {
 export async function streamTurn(
   options: StreamTurnOptions,
 ): Promise<StreamTurnResult> {
-  const { contents, systemInstruction, tools, signal, onText } = options;
+  const { contents, systemInstruction, tools, signal, onText, credential } = options;
   const candidates = options.models?.length ? options.models : CHAT_MODELS;
 
   let lastError: unknown;
@@ -270,7 +341,8 @@ export async function streamTurn(
     // Skip a model known to be rate-limited — but only when there is somewhere
     // else to go. If the visitor pinned one model, try it and report the truth
     // rather than refusing on the strength of a stale timestamp.
-    const cooldown = exhaustedUntil.get(model);
+    const cooldownKey = `${credential.fingerprint}:${model}`;
+    const cooldown = exhaustedUntil.get(cooldownKey);
     if (candidates.length > 1 && cooldown && cooldown > Date.now()) {
       quotaHit = true;
       continue;
@@ -279,10 +351,10 @@ export async function streamTurn(
     let response: Response;
     try {
       response = await fetch(
-        `${API_ROOT}/${model}:streamGenerateContent?alt=sse&key=${env.geminiApiKey}`,
+        `${API_ROOT}/${model}:streamGenerateContent?alt=sse`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(credential),
           signal,
           body: JSON.stringify({
             contents,
@@ -314,9 +386,12 @@ export async function streamTurn(
       const body = await response.text();
       if (response.status === 429) {
         quotaHit = true;
-        exhaustedUntil.set(model, Date.now() + (retryDelayMs(body) ?? 60_000));
+        exhaustedUntil.set(cooldownKey, Date.now() + (retryDelayMs(body) ?? 60_000));
       }
-      lastError = new Error(`${model} responded ${response.status}: ${body.slice(0, 200)}`);
+      // Same reasoning as embedOnce: the status is ours to report, the upstream
+      // body is not ours to relay. This one ends up in an SSE `error` event
+      // rendered in the visitor's browser.
+      lastError = new Error(`${model} responded ${response.status}.`);
       continue; // quotas are per-model, so the next one may well succeed
     }
 
@@ -385,7 +460,10 @@ export async function streamTurn(
     buffer += decoder.decode();
     if (buffer.trim()) handleLine(buffer.trim());
 
-    exhaustedUntil.delete(model);
+    // Keyed the same way it was set. This read `delete(model)` before keys became
+    // fingerprint-scoped, which silently stopped matching anything — a model stayed
+    // marked exhausted for its full cooldown even after answering successfully.
+    exhaustedUntil.delete(cooldownKey);
 
     return {
       parts,

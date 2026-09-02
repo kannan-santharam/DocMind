@@ -22,6 +22,7 @@ export function Composer({
   onOpenControls,
   settingsSummary,
   tracing,
+  ownKeyInUse,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -38,6 +39,8 @@ export function Composer({
   settingsSummary: string | null;
   /** True when questions are sent to Langfuse — drives the disclosure below. */
   tracing: boolean;
+  /** True when the visitor is running on their own Gemini key. */
+  ownKeyInUse?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -129,26 +132,36 @@ export function Composer({
           </div>
         </div>
 
-        <p className="mt-2 text-center text-[0.7rem] leading-relaxed text-[var(--text-muted)]">
-          Answers are grounded in your uploaded documents. Enter to send, Shift+Enter for a new
-          line.
-          {tracing && (
-            <>
-              {' '}
-              Your questions and the retrieved passages are sent to{' '}
-              <a
-                href="https://langfuse.com"
-                target="_blank"
-                rel="noreferrer"
-                className="underline decoration-dotted underline-offset-2 hover:text-[var(--text-title)]"
-              >
-                Langfuse
-              </a>
-              , a third-party tracing service, so this demo&apos;s retrieval quality can be
-              reviewed.
-            </>
-          )}
+        <p className="mt-2 text-center text-[0.7rem] text-[var(--text-muted)]">
+          Enter to send · Shift+Enter for a new line
         </p>
+
+        {tracing && (
+          /**
+           * Tracing does not depend on whose key paid for the answer, so this is
+           * shown to visitors on their own key too — the honest position, since a
+           * server-side trace is invisible to them otherwise.
+           *
+           * The second sentence appears only when the visitor supplied a key,
+           * because it is the question that arises only then: "I have just handed
+           * this site a credential and it says it forwards my questions to a third
+           * party — does it forward that too?" Saying it unprompted to a recruiter
+           * who has no key would raise a worry rather than settle one.
+           */
+          <p className="mt-1 text-center text-[0.65rem] leading-relaxed text-[var(--text-muted)]/75">
+            Your questions and the passages retrieved to answer them are sent to{' '}
+            <a
+              href="https://langfuse.com"
+              target="_blank"
+              rel="noreferrer"
+              className="underline decoration-dotted underline-offset-2 hover:text-[var(--text-title)]"
+            >
+              Langfuse
+            </a>
+            , a third-party tracing service, so retrieval quality can be reviewed.
+            {ownKeyInUse && ' Your API key is not part of that — it is never logged, traced or stored.'}
+          </p>
+        )}
       </div>
     </div>
   );

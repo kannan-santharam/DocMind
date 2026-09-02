@@ -52,10 +52,11 @@ async function checkGemini() {
   if (!key) return fail('GEMINI_API_KEY', 'not set — see .env.example');
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:embedContent?key=${key}`,
+    // Header, not `?key=` — a query string lands in proxy logs and NODE_DEBUG output.
+    `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:embedContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify({
         model: `models/${EMBED_MODEL}`,
         content: { parts: [{ text: 'preflight' }] },
@@ -96,10 +97,10 @@ async function checkGeminiChat() {
 
   for (const model of CHAT_MODELS) {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: 'Reply with the single word: ready' }] }],
           generationConfig: { maxOutputTokens: 16 },

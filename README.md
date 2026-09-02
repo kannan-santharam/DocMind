@@ -126,6 +126,25 @@ apply before citations are built, so nothing leaks through the citation panel. N
 environment variable — the signal is a request header. Append `?region=in` to override
 it, which is how the path is testable at all off Vercel.
 
+## Whose API key pays
+
+Through the portfolio the app runs on the owner's Gemini key — a recruiter is never
+asked for a credential. At the public URL each visitor supplies their own, free from
+[AI Studio](https://aistudio.google.com/apikey), and the app walks them through getting
+one on first load.
+
+Not a licensing choice, an arithmetic one. Embedding is the expensive half of a RAG app
+and the free tier allows roughly 1000 requests a day, so a handful of visitors indexing
+PDFs exhausts it — for everyone, including the portfolio embed. A key that is free and
+takes a minute is a better deal than a demo that stops working by mid-morning.
+
+The visitor's key is kept in their browser's local storage, sent per request in
+`x-goog-api-key` rather than a URL so it stays out of access logs, and never written to
+the database or attached to a trace. `POST /api/key/check` verifies it against Google's
+model list — no tokens, no embedding quota — so a bad paste fails at the point it was
+made. Seed runs authenticate with `SEED_TOKEN` and use the owner's key, so rebuilding the
+shared corpus never needs a visitor credential.
+
 ## The preloaded documents
 
 Through a trusted origin, visitors arrive with documents already indexed, so the first

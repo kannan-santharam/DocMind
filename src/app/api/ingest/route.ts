@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { chunkDocument } from '@/lib/chunk';
+import { ApiKeyRequiredError, resolveApiKey } from '@/lib/apiKey';
 import { embedDocuments, QuotaExhaustedError } from '@/lib/gemini';
 import { MAX_UPLOAD_BYTES, ParseError, parsePastedText, parseUpload } from '@/lib/parse';
+import { redactApiKeys } from '@/lib/privacy';
 import { checkRateLimit, LIMITS, rateLimitIdentity } from '@/lib/rateLimit';
 import {
   canWriteSharedNamespace,
@@ -67,6 +69,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Embedding is the expensive half of this app — roughly 1000 requests a day
+    // on the free tier, which a few uploads exhaust. So an upload from the public
+    // URL runs on the visitor's own key. Seed runs resolve to the owner's: they
+    // carry `x-seed-token` but no `x-embed-origin`, so trust alone would 401 them
+    // and leave the shared corpus unrebuildable.
+    let credential;
+    try {
+      credential = resolveApiKey(req);
+    } catch (error) {
+      if (error instanceof ApiKeyRequiredError) {
+        return NextResponse.json({ error: error.message, needsKey: true }, { status: 401 });
+      }
+      throw error;
+    }
+
     if (!seeding) {
       const limit = await checkRateLimit(
         rateLimitIdentity(req, sessionId),
@@ -104,6 +121,11 @@ export async function POST(req: NextRequest) {
       filename = (body.title ?? '').trim() || 'Pasted text';
       mime = 'text/plain';
     }
+
+    // Stripped before chunking, so a key never reaches an embedding call or a
+    // stored passage. Redacting at retrieval, as contact details are, would be too
+    // late: by then it is already in the database.
+    parsed = { ...parsed, text: redactApiKeys(parsed.text) };
 
     if (parsed.text.length > MAX_TEXT_CHARS) {
       return NextResponse.json(
@@ -187,6 +209,7 @@ export async function POST(req: NextRequest) {
       });
 
       const vectors = await embedDocuments(
+        credential,
         chunks.map((c) => (c.heading ? `${c.heading}\n\n${c.content}` : c.content)),
         { title: filename, deadline },
       );
