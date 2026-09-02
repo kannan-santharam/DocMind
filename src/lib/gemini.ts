@@ -20,6 +20,9 @@ export const EMBED_MODEL = 'gemini-embedding-001';
  */
 export const EMBED_DIM = 768;
 
+/** Ceiling on one embedding call. Measured round trips are under a second. */
+const EMBED_TIMEOUT_MS = 15_000;
+
 // --- Gemini REST payload shapes (only the fields this app touches) -----------
 
 export interface GeminiPart {
@@ -77,10 +80,20 @@ async function embedOnce(
   taskType: EmbedTask,
   title?: string,
 ) {
+  /**
+   * The same hang, on the other endpoint.
+   *
+   * `withRetry` retries failures, but a request that never completes is not a
+   * failure it can see — so a stalled embed would hold an upload open until the
+   * function died. Non-streaming, so a single total timeout is enough here; the
+   * retry wrapper then treats the abort as a normal attempt failure and tries
+   * again.
+   */
   const res = await fetch(
     `${API_ROOT}/${EMBED_MODEL}:embedContent`,
     {
       method: 'POST',
+      signal: AbortSignal.timeout(EMBED_TIMEOUT_MS),
       headers: authHeaders(credential),
       body: JSON.stringify({
         model: `models/${EMBED_MODEL}`,
@@ -137,6 +150,44 @@ const EMBED_RPM_BUDGET = 85; // headroom for anything else sharing the key
 const RATE_WINDOW_MS = 60_000;
 
 export class QuotaExhaustedError extends Error {}
+
+/**
+ * How long one model gets to start responding before the cascade moves on.
+ *
+ * The fallback chain was written for models that *fail* — a 429, a 5xx, a refused
+ * connection. It did not cover the failure that actually happened: a model that
+ * accepts the request and then never answers. With no timeout the loop waits on
+ * the first candidate forever, the other four are never tried, and the whole thing
+ * dies when the serverless function hits `maxDuration` — a 504 with nothing
+ * streamed, from a system whose entire point is having somewhere else to go.
+ *
+ * Observed live: `gemini-flash-latest` and `gemini-3.7-flash` both hung
+ * indefinitely while the other three answered the same prompt in 1.5–4.2s. Six
+ * seconds sits clear of the healthy range and keeps the cost of discovering a dead
+ * model low, since on serverless most instances are cold and rediscover it.
+ *
+ * This bounds time-to-response, not the answer. The timer is cleared the moment
+ * headers arrive, so a long reply streams for as long as it needs.
+ */
+const MODEL_RESPONSE_TIMEOUT_MS = 6_000;
+
+/**
+ * How long a stream may go silent mid-answer before the model is written off.
+ *
+ * More generous than the first-response budget: a model that has started
+ * answering may legitimately pause while it thinks between tool calls.
+ */
+const STREAM_IDLE_TIMEOUT_MS = 20_000;
+
+/**
+ * Ceiling on the whole cascade, leaving room under the 60s function limit.
+ *
+ * Five candidates that each hang cost 5 × the response timeout before the loop
+ * even reports failure, and that arithmetic is what turns one slow model into a
+ * platform timeout with nothing streamed. Once this passes, remaining candidates
+ * are skipped and the caller gets a real error instead of a 504.
+ */
+const CASCADE_BUDGET_MS = 40_000;
 
 /**
  * Models known to be rate-limited, and when they are worth trying again.
@@ -336,8 +387,21 @@ export async function streamTurn(
 
   let lastError: unknown;
   let quotaHit = false;
+  /**
+   * Tracked apart from `quotaHit` on purpose.
+   *
+   * Folding a hang into the quota flag tells the visitor "every model has hit its
+   * free-tier quota, which resets daily" — advice that sends them away to wait for
+   * a reset that was never the problem, and on their own key implies they burned
+   * an allowance they have not touched. Different cause, different message.
+   */
+  let unresponsive = false;
+  const cascadeDeadline = Date.now() + CASCADE_BUDGET_MS;
 
   for (const model of candidates) {
+    // Stop walking rather than march the whole list into a platform timeout.
+    if (Date.now() > cascadeDeadline && lastError) break;
+
     // Skip a model known to be rate-limited — but only when there is somewhere
     // else to go. If the visitor pinned one model, try it and report the truth
     // rather than refusing on the strength of a stale timestamp.
@@ -349,13 +413,21 @@ export async function streamTurn(
     }
 
     let response: Response;
+    // Aborts this attempt if the model does not start responding, while still
+    // honouring the caller's own signal when the browser goes away.
+    const attempt = new AbortController();
+    const timeout = setTimeout(() => attempt.abort(), MODEL_RESPONSE_TIMEOUT_MS);
+    const attemptSignal = signal
+      ? AbortSignal.any([signal, attempt.signal])
+      : attempt.signal;
+
     try {
       response = await fetch(
         `${API_ROOT}/${model}:streamGenerateContent?alt=sse`,
         {
           method: 'POST',
           headers: authHeaders(credential),
-          signal,
+          signal: attemptSignal,
           body: JSON.stringify({
             contents,
             systemInstruction: { parts: [{ text: systemInstruction }] },
@@ -377,10 +449,31 @@ export async function streamTurn(
         },
       );
     } catch (error) {
+      clearTimeout(timeout);
+      // The caller aborting is not a model failure — stop, do not try the rest.
       if (signal?.aborted) throw error;
-      lastError = error;
+      if (attempt.signal.aborted) {
+        /**
+         * Remember the hang, exactly as a 429 is remembered.
+         *
+         * Without this the cooldown map only learns about quota errors, so a
+         * hanging model is re-tried at the top of the cascade on every turn of the
+         * agent loop — measured at 77s for a single answer, paying the same wait
+         * again on each turn against the same dead model, which still blows the
+         * function's 60s budget. One timeout should cost a request once, not once
+         * per turn.
+         */
+        exhaustedUntil.set(cooldownKey, Date.now() + 60_000);
+        unresponsive = true;
+        lastError = new Error(
+          `${model} did not respond within ${MODEL_RESPONSE_TIMEOUT_MS / 1000}s.`,
+        );
+      } else {
+        lastError = error;
+      }
       continue;
     }
+    clearTimeout(timeout);
 
     if (!response.ok || !response.body) {
       const body = await response.text();
@@ -445,14 +538,60 @@ export async function streamTurn(
     const decoder = new TextDecoder();
     let buffer = '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    /**
+     * The headers arriving is not the same as the answer arriving.
+     *
+     * The response timeout above is cleared once headers land, which leaves the
+     * body free to stall forever — the same hang one step later, and the reason
+     * bounding only time-to-first-response is not enough. Each read is raced
+     * against an idle timer instead, so a stream that stops producing is caught.
+     *
+     * What happens next depends on whether the visitor has already seen text. With
+     * nothing emitted, this model is simply a failure and the cascade moves on.
+     * Once tokens are on screen, switching models would splice two different
+     * answers together, so the honest move is to stop and say so.
+     */
+    let stalled = false;
+    try {
+      for (;;) {
+        // The timer is cleared whichever way the race lands. Leaving it pending
+        // would queue one live timeout per chunk — harmless to correctness, but on
+        // a long answer it is hundreds of them holding the event loop open and
+        // keeping a serverless function from freezing.
+        let idle: ReturnType<typeof setTimeout> | undefined;
+        const chunk = await Promise.race([
+          reader.read(),
+          new Promise<'stalled'>((resolve) => {
+            idle = setTimeout(() => resolve('stalled'), STREAM_IDLE_TIMEOUT_MS);
+          }),
+        ]);
+        clearTimeout(idle);
 
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) handleLine(line);
+        if (chunk === 'stalled') {
+          stalled = true;
+          break;
+        }
+        if (chunk.done) break;
+
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) handleLine(line);
+      }
+    } finally {
+      if (stalled) await reader.cancel().catch(() => undefined);
+    }
+
+    if (stalled) {
+      exhaustedUntil.set(cooldownKey, Date.now() + 60_000);
+      unresponsive = true;
+      if (text) {
+        throw new Error(
+          `${model} stopped streaming part-way through the answer. Please ask again.`,
+        );
+      }
+      lastError = new Error(`${model} opened a stream and then stopped responding.`);
+      continue;
     }
 
     // The last frame often arrives without a trailing newline, which would leave
@@ -474,6 +613,14 @@ export async function streamTurn(
       model,
       usage,
     };
+  }
+
+  if (unresponsive && !quotaHit) {
+    throw new Error(
+      candidates.length === 1
+        ? `${candidates[0]} is not responding right now. Switch the model to Auto and the app will try the others.`
+        : 'Gemini is not responding at the moment — every model in the fallback chain timed out. This is upstream of the app; please try again shortly.',
+    );
   }
 
   if (quotaHit) {
