@@ -26,6 +26,7 @@ const KIND_LABEL: Record<string, string> = {
 
 export function Sidebar({
   documents,
+  loaded,
   uploading,
   error,
   notices,
@@ -42,6 +43,8 @@ export function Sidebar({
   onClose,
 }: {
   documents: DocumentRecord[];
+  /** False until the document list has arrived; see the knowledge-base block. */
+  loaded?: boolean;
   uploading: UploadState | null;
   error: string | null;
   onFile: (file: File) => void;
@@ -141,7 +144,15 @@ export function Sidebar({
             )}
           </div>
 
-          {documents.length === 0 ? (
+          {/* An empty list and an unfetched list look identical from here, and
+              "Nothing indexed yet" is wrong for anyone arriving through the
+              portfolio. Placeholders until the count is real. */}
+          {loaded === false ? (
+            <div aria-hidden className="animate-pulse space-y-1">
+              <div className="h-9 rounded-lg bg-[var(--bg-inner)]" />
+              <div className="h-9 rounded-lg bg-[var(--bg-inner)]" />
+            </div>
+          ) : documents.length === 0 ? (
             <p className="px-1 text-[0.7rem] leading-relaxed text-[var(--text-muted)]">
               Nothing indexed yet. Upload a document and the agent will search it before
               answering.

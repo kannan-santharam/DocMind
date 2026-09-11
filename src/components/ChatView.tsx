@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { Region } from '@/lib/region';
 import { EmptyState } from './EmptyState';
+import { EmptyStateSkeleton } from './EmptyStateSkeleton';
 import { Message } from './Message';
 import type { ChatMessage } from '@/lib/types';
 
@@ -52,15 +53,23 @@ export function ChatView({
             The landing copy depends on what is indexed, which only the document
             fetch can tell us. Rendering the "no documents yet" state first and
             swapping it a moment later flashes the wrong message at every
-            first-time visitor, so hold until it is known.
+            first-time visitor, so it is held until it is known.
+
+            Held, but no longer held behind nothing. Rendering null for the
+            duration of the fetch trades a wrong message for an empty page, which
+            is worse in the iframe: the overlay opens blank and the heading
+            arrives from nowhere. A skeleton says "loading" without claiming
+            anything about a corpus nobody has counted yet.
           */}
-          {documentsLoaded && (
+          {documentsLoaded ? (
             <EmptyState
               hasDocuments={hasDocuments}
               onlyPreloaded={onlyPreloaded}
               region={region}
               onPick={onPickPrompt}
             />
+          ) : (
+            <EmptyStateSkeleton />
           )}
         </div>
       ) : (
