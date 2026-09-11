@@ -120,13 +120,23 @@ export function containsContactDetails(text: string): boolean {
 /**
  * Origins that get the full experience, as a comma-separated env value:
  *
- *   TRUSTED_ORIGINS=https://kannan-ai-dev.vercel.app,http://localhost:5173
+ *   TRUSTED_ORIGINS=https://kannansantharam.com,https://www.kannansantharam.com,
+ *                    https://kannan-ai-dev.vercel.app,http://localhost:5173
  *
- * Two things are gated on this, both answering the same question — "is this being
+ * List both the apex and the www form of a custom domain. The browser reports the
+ * origin the visitor actually loaded, and which form is canonical can change.
+ *
+ * Three things are gated on this, all answering the same question — "is this being
  * viewed through the portfolio?":
  *
  *   1. the preloaded documents (profile, skills, architecture write-up)
  *   2. the phone number and email inside them
+ *   3. whether the owner's Gemini key serves the request, or the visitor supplies
+ *      their own (see lib/apiKey.ts)
+ *
+ * The same value also builds `frame-ancestors` in next.config.ts, so an origin
+ * missing here cannot frame the app *and* would land in restricted mode if it
+ * did. One list, deliberately — two would drift.
  *
  * Unset means nothing is trusted, so the app is a blank document Q&A tool
  * everywhere — the safe default if the variable is ever lost.
