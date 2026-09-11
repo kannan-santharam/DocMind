@@ -181,6 +181,7 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
       <div className="hidden w-72 shrink-0 lg:block">
         <Sidebar
           documents={docs.documents}
+          loaded={docs.loaded}
           uploading={docs.uploading}
           error={docs.error}
           notices={docs.notices}
@@ -218,6 +219,7 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
           <div className="absolute inset-y-0 left-0 w-[85vw] max-w-xs">
             <Sidebar
               documents={docs.documents}
+              loaded={docs.loaded}
               uploading={docs.uploading}
               error={docs.error}
               notices={docs.notices}
@@ -258,13 +260,23 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
           </button>
 
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-bold text-[var(--text-title)]">
-              {docs.documents.length === 0
-                ? 'No documents indexed'
-                : ownedDocuments.length === 0 && docs.trusted
-                  ? 'Kannan Santharam — profile, skills & this project'
-                  : `${docs.documents.length} documents indexed`}
-            </p>
+            {/*
+              Same gate as the landing copy, and for the same reason. Until the
+              document list arrives, "No documents indexed" is not a fact — it is
+              a guess that happens to be wrong for every visitor arriving through
+              the portfolio, and it is the one line they read first.
+            */}
+            {docs.loaded ? (
+              <p className="truncate text-xs font-bold text-[var(--text-title)]">
+                {docs.documents.length === 0
+                  ? 'No documents indexed'
+                  : ownedDocuments.length === 0 && docs.trusted
+                    ? 'Kannan Santharam — profile, skills & this project'
+                    : `${docs.documents.length} documents indexed`}
+              </p>
+            ) : (
+              <div aria-hidden className="h-4 w-52 animate-pulse rounded bg-[var(--bg-card)]" />
+            )}
             <p className="truncate text-[0.65rem] text-[var(--text-muted)]">
               tool-calling retrieval agent · answers cite the passages they used
             </p>
@@ -325,11 +337,17 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
           placeholder={
             showKeyPanel
               ? 'Add your Gemini API key to start…'
-              : docs.documents.length === 0
-              ? 'Upload a document first, then ask about it…'
-              : ownedDocuments.length > 0 || !docs.trusted
-                ? 'Ask about your documents…'
-                : "Ask about Kannan's experience, or upload a job description…"
+              : // The third place the unloaded document list would assert
+                // something false. "Upload a document first" told through the
+                // portfolio is both wrong and discouraging, so say nothing about
+                // the corpus until it has been counted.
+                !docs.loaded
+                ? 'Loading…'
+                : docs.documents.length === 0
+                ? 'Upload a document first, then ask about it…'
+                : ownedDocuments.length > 0 || !docs.trusted
+                  ? 'Ask about your documents…'
+                  : "Ask about Kannan's experience, or upload a job description…"
           }
           model={settings.model}
           models={models}
