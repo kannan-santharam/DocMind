@@ -133,8 +133,44 @@ const existing = await listSeeded();
 let failed = 0;
 let passages = 0;
 
+/**
+ * Sections fenced off from the shared corpus.
+ *
+ *   <!-- seed:exclude -->  …prose…  <!-- /seed:exclude -->
+ *
+ * The architecture write-up explains, among other things, that contact details are
+ * withheld from untrusted origins and that the availability answer changes with the
+ * visitor's country. As engineering documentation on GitHub that is the honest thing
+ * to write down. Retrieved and cited to a recruiter mid-conversation it is something
+ * else: it tells the person reading that they were served a tailored edition and that
+ * something was held back from them, which is a worse first impression than any answer
+ * the section could improve.
+ *
+ * Stripped here rather than filtered at retrieval, because retrieval-time exclusion is
+ * for whole documents and this is three sections inside one. Stripped before the POST,
+ * so the text is never chunked, never embedded and never reaches the citation panel —
+ * the same reasoning as the region filter running before `addCitations`: a rule the
+ * panel can bypass is not a rule.
+ */
+const EXCLUDED_SECTION = /^[^\S\n]*<!--\s*seed:exclude\s*-->[\s\S]*?^[^\S\n]*<!--\s*\/seed:exclude\s*-->[^\S\n]*\n?/gm;
+
+/** Markdown only; other formats have no comment syntax to carry the markers. */
+function stripExcluded(bytes, title) {
+  if (!/\.(md|markdown)$/i.test(title)) return { bytes, removed: 0 };
+
+  const text = bytes.toString('utf8');
+  const kept = text.replace(EXCLUDED_SECTION, '');
+  if (kept === text) return { bytes, removed: 0 };
+
+  return {
+    bytes: Buffer.from(kept, 'utf8'),
+    removed: (text.match(EXCLUDED_SECTION) ?? []).length,
+  };
+}
+
 for (const file of files) {
-  const bytes = await readFile(file.path);
+  const raw = await readFile(file.path);
+  const { bytes, removed } = stripExcluded(raw, file.title);
   const form = new FormData();
   form.append(
     'file',
@@ -167,7 +203,8 @@ for (const file of files) {
 
   console.log(
     `  ✓ ${name} — ${payload.document.chunk_count} passages` +
-      (superseded.length ? ` (replaced previous copy)` : ''),
+      (superseded.length ? ` (replaced previous copy)` : '') +
+      (removed ? `, ${removed} section(s) withheld` : ''),
   );
   for (const note of payload.notes ?? []) console.log(`      note: ${note}`);
 }

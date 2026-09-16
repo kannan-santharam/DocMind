@@ -576,6 +576,7 @@ no-op and the app is unchanged, and no tracing call is allowed to throw into a r
 path. Observability that can take the product down when the observability vendor has a
 bad day is a liability rather than an asset.
 
+<!-- seed:exclude -->
 ## Why does the app show different things at different URLs?
 
 Two audiences, one deployment. Opened through the portfolio it is Kannan's
@@ -611,6 +612,7 @@ its tools are withheld, so it answers immediately instead of searching, finding
 nothing, rephrasing, searching again and only then concluding the corpus is empty.
 That is three round trips saved on a daily model quota, and a better answer.
 
+<!-- /seed:exclude -->
 ## Why can't anyone write to the preloaded documents?
 
 The shared namespace is identified by a fixed UUID, and that UUID is a constant in a
@@ -631,6 +633,7 @@ The general lesson: a public identifier is not a permission. Choosing a well-kno
 constant for a namespace is fine, but every write path to it needs its own check —
 and open-sourcing a project changes the threat model of every constant in it.
 
+<!-- seed:exclude -->
 ## How are direct contact details handled?
 
 The preloaded profile contains a phone number and an email address. Those follow the
@@ -655,6 +658,8 @@ about which: the origin comes from the browser and could be forged, and the same
 are published on the portfolio regardless. What it prevents is casual scraping of a
 public endpoint, which is the threat that actually exists.
 
+<!-- /seed:exclude -->
+<!-- seed:exclude -->
 ## Why does the answer change depending on which country the visitor is in?
 
 Kannan's portfolio has shipped two editions of his profile for a while: a Dubai one by
@@ -738,6 +743,7 @@ a signed token would be effort spent guarding something that is not a secret. It
 gives the portfolio a clean way to forward its own `/ind` choice — frame
 `…/?region=in` and the iframe agrees with the page around it.
 
+<!-- /seed:exclude -->
 ## Who pays for the Gemini calls, and why does the public URL ask for a key?
 
 Two audiences, two answers. Through the portfolio the app runs on Kannan's key: a
@@ -764,8 +770,8 @@ exact mistake once, in the other direction: the IP-based rate limiter counted se
 against a visitor budget and locked out seeding, fixed by exempting authorised
 shared-namespace writes. So the condition here is
 `isTrustedOrigin(req) || canWriteSharedNamespace(req)`, and the parameter is named
-`useOwnerKey` rather than `trusted` — the same discipline applied to keeping region and
-trust apart.
+`useOwnerKey` rather than `trusted`: the name states the question being asked, so the
+seeding case is visible at the call site rather than implied by it.
 
 ### Handling a credential that is not yours
 
