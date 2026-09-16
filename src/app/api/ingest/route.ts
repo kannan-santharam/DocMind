@@ -252,10 +252,19 @@ export async function POST(req: NextRequest) {
     if (error instanceof QuotaExhaustedError) {
       return NextResponse.json({ error: error.message }, { status: 429 });
     }
+    // Everything above this point is an error type this app authored, with wording
+    // written for the person reading it. What reaches here did not come from us:
+    // a PostgREST failure carrying schema detail, an undici error quoting the
+    // request it choked on, a driver message naming a file path. The typed errors
+    // stay verbatim; this one does not get to speak to the visitor.
     const message = error instanceof Error ? error.message : 'Ingestion failed.';
+    console.error('ingest:unhandled', error);
     trace.update({ metadata: { error: message } });
     await trace.flush();
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Could not index that document. Try again in a moment.' },
+      { status: 500 },
+    );
   }
 }
 

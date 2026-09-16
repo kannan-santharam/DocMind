@@ -26,7 +26,15 @@ export async function GET(req: NextRequest) {
       .in('session_id', readableSessions(sessionId, trusted))
       .order('created_at', { ascending: false });
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // Postgres speaks in table names, column names, constraint names and RLS policy
+    // text. Forwarding that verbatim hands a stranger a map of the schema for the
+    // price of a malformed request, and the visitor cannot act on any of it anyway.
+    // The detail goes to the server log, where it is useful; the client gets a
+    // sentence.
+    if (error) {
+      console.error('documents:list', error);
+      return NextResponse.json({ error: 'Could not load documents.' }, { status: 500 });
+    }
 
     // The other region's availability edition is hidden from the sidebar for the
     // same reason it is hidden from retrieval — a visitor in Chennai should not
@@ -68,7 +76,10 @@ export async function DELETE(req: NextRequest) {
     const query = supabase().from('documents').delete().eq('session_id', sessionId);
     const { error } = id ? await query.eq('id', id) : await query;
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      console.error('documents:delete', error);
+      return NextResponse.json({ error: 'Could not delete.' }, { status: 500 });
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof SessionError) {

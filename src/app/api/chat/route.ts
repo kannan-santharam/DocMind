@@ -163,7 +163,19 @@ export async function POST(req: NextRequest) {
           const message =
             error instanceof Error ? error.message : 'The agent hit an unexpected error.';
           trace.update({ metadata: { error: message } });
-          emit({ type: 'error', message });
+
+          // The trace gets the real message; the stream does not. Errors reaching
+          // here are raised by Postgres, undici or the Gemini client rather than by
+          // this app, and they describe the request that failed — table and column
+          // names, header contents, file paths. The two audiences want different
+          // things: the log wants detail, the visitor wants to know whether to
+          // retry. Errors this app raises deliberately, like a needed key or an
+          // exhausted quota, are answered further up and keep their own wording.
+          console.error('chat:unhandled', error);
+          emit({
+            type: 'error',
+            message: 'Something went wrong answering that. Try asking again.',
+          });
         }
       } finally {
         // Flush before the stream closes. A serverless function freezes the
