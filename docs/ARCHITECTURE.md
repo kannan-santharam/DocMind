@@ -577,6 +577,47 @@ path. Observability that can take the product down when the observability vendor
 bad day is a liability rather than an asset.
 
 <!-- seed:exclude -->
+## What do the analytics actually see, embedded in an iframe?
+
+Vercel Web Analytics and Speed Insights are mounted in the root layout. Both beacons
+are same-origin `/_vercel/*` paths, so `connect-src 'self'` passes them without a CSP
+change — which is the right outcome, because widening that directive to admit a
+third-party host would undo the guarantee it exists for. A blocked beacon fails
+silently into "no data", so a console with no CSP error is part of verifying this works
+rather than a nicety.
+
+The honest part is how much of it survives the embed. DocMind's primary audience reaches
+it inside a full-screen iframe on the portfolio, and that changes what three of the four
+dimensions mean:
+
+| | what it reports in the iframe | useful? |
+|---|---|---|
+| Country | IP-derived at the edge, unaffected by the frame | yes |
+| Referrer | always the portfolio — `document.referrer` is the parent | no, the portfolio's own analytics has this |
+| Path | always `/`; one route, no router | no |
+| Timing | the iframe's own load: TTFB and FCP are real, LCP and CLS are unreliable cross-origin | partly |
+
+Worth stating because the obvious expectation — "analytics will show me where visitors
+came from" — is the one thing this deployment cannot answer. That data exists, but it
+belongs to the parent page, not here.
+
+Country comes from the edge rather than the browser, which is why
+`Permissions-Policy: geolocation=()` stays exactly as it is. Those are different
+mechanisms, and only one of them is a permission a visitor should be asked for.
+
+Nothing beyond page views and timings is sent. There is no custom event carrying what
+a visitor asked, or how often — Langfuse already holds the conversation, with the
+scrubbing and the disclosure built around it, and a second copy of the same facts in a
+second vendor would be a second thing to keep honest for no extra insight.
+
+Adding even this much meant the composer's disclosure had to grow a clause. An
+enumeration of what leaves the app is worse than no enumeration once it is incomplete —
+a visitor who reads "your questions go to Langfuse" reasonably concludes that is the
+whole of it.
+
+<!-- /seed:exclude -->
+
+<!-- seed:exclude -->
 ## Why does the app show different things at different URLs?
 
 Two audiences, one deployment. Opened through the portfolio it is Kannan's

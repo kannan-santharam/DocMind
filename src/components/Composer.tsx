@@ -136,32 +136,45 @@ export function Composer({
           Enter to send · Shift+Enter for a new line
         </p>
 
-        {tracing && (
-          /**
-           * Tracing does not depend on whose key paid for the answer, so this is
-           * shown to visitors on their own key too — the honest position, since a
-           * server-side trace is invisible to them otherwise.
-           *
-           * The second sentence appears only when the visitor supplied a key,
-           * because it is the question that arises only then: "I have just handed
-           * this site a credential and it says it forwards my questions to a third
-           * party — does it forward that too?" Saying it unprompted to a recruiter
-           * who has no key would raise a worry rather than settle one.
-           */
-          <p className="mt-1 text-center text-[0.65rem] leading-relaxed text-[var(--text-muted)]/75">
-            Your questions and the passages retrieved to answer them are sent to{' '}
-            <a
-              href="https://langfuse.com"
-              target="_blank"
-              rel="noreferrer"
-              className="underline decoration-dotted underline-offset-2 hover:text-[var(--text-title)]"
-            >
-              Langfuse
-            </a>
-            , a third-party tracing service, so retrieval quality can be reviewed.
-            {ownKeyInUse && ' Your API key is not part of that — it is never logged, traced or stored.'}
-          </p>
-        )}
+        {/**
+          * What leaves this app, stated in one place.
+          *
+          * The list has to stay complete or it is worse than absent: a visitor who
+          * reads "your questions go to Langfuse" reasonably concludes that is the
+          * whole of it. Adding analytics without adding a clause here would have
+          * made a true sentence into a misleading one.
+          *
+          * The two halves are gated differently on purpose. Tracing is optional
+          * configuration and the sentence only appears when it is actually on.
+          * Analytics is always on, so its sentence always shows. It stays short
+          * because what it covers is small: page views, and nothing about the
+          * conversation. Questions are Langfuse's business alone.
+          *
+          * The key sentence appears only to visitors who supplied one. It answers
+          * a question that arises only then: "I have just handed this site a
+          * credential and it says it forwards my questions to a third party — does
+          * it forward that too?" Said unprompted to a recruiter with no key, it
+          * would raise a worry rather than settle one.
+          */}
+        <p className="mt-1 text-center text-[0.65rem] leading-relaxed text-[var(--text-muted)]/75">
+          {tracing && (
+            <>
+              Your questions and the passages retrieved to answer them are sent to{' '}
+              <a
+                href="https://langfuse.com"
+                target="_blank"
+                rel="noreferrer"
+                className="underline decoration-dotted underline-offset-2 hover:text-[var(--text-title)]"
+              >
+                Langfuse
+              </a>
+              , a third-party tracing service, so retrieval quality can be reviewed.{' '}
+            </>
+          )}
+          Page views go to Vercel Analytics, which is cookieless and receives no part
+          of the conversation.
+          {ownKeyInUse && ' Your API key reaches neither — it is never logged, traced or stored.'}
+        </p>
       </div>
     </div>
   );

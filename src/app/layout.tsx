@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from 'next';
+import { Analytics } from '@vercel/analytics/next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import { ThemeProvider, themeBootstrapScript } from '@/context/ThemeContext';
 import './globals.css';
 
@@ -36,6 +38,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="h-full antialiased">
         <ThemeProvider>{children}</ThemeProvider>
+        {/**
+          * Visitor analytics, and worth being precise about what they can and
+          * cannot see from inside an iframe.
+          *
+          * Both beacons are same-origin `/_vercel/*` paths, so `connect-src 'self'`
+          * passes them untouched — no CSP change was needed, and if one were, that
+          * would be the wrong trade. A blocked beacon fails silently, so a console
+          * free of CSP errors is part of verifying this works at all.
+          *
+          * Country comes from the edge, not from the browser: it is IP-derived
+          * server-side, which is why `Permissions-Policy: geolocation=()` stays
+          * exactly as it is. Those are different mechanisms and only one of them is
+          * a permission the visitor should be asked for.
+          */}
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
