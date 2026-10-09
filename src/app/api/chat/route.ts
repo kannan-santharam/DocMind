@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { runAgent } from '@/lib/agent';
 import { ApiKeyRequiredError, resolveApiKey } from '@/lib/apiKey';
-import type { GeminiContent } from '@/lib/gemini';
+import { QuotaExhaustedError, type GeminiContent } from '@/lib/gemini';
 import { resolveModels } from '@/lib/models';
 import { checkRateLimit, LIMITS, rateLimitIdentity } from '@/lib/rateLimit';
 import { isTrustedOrigin } from '@/lib/privacy';
@@ -171,11 +171,18 @@ export async function POST(req: NextRequest) {
           // things: the log wants detail, the visitor wants to know whether to
           // retry. Errors this app raises deliberately, like a needed key or an
           // exhausted quota, are answered further up and keep their own wording.
-          console.error('chat:unhandled', error);
-          emit({
-            type: 'error',
-            message: 'Something went wrong answering that. Try asking again.',
-          });
+          // A spent quota is raised by this app on purpose and its wording is
+          // written for visitors, so it goes through as is. Everything else
+          // stays generic.
+          if (error instanceof QuotaExhaustedError) {
+            emit({ type: 'error', message: error.message });
+          } else {
+            console.error('chat:unhandled', error);
+            emit({
+              type: 'error',
+              message: 'Something went wrong answering that. Try asking again.',
+            });
+          }
         }
       } finally {
         // Flush before the stream closes. A serverless function freezes the
