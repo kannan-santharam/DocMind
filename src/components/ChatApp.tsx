@@ -131,6 +131,15 @@ export function ChatApp({
    * to frame the app at all). Once a session id exists we tell the parent we
    * are ready; asking earlier would fail with a 400 for the missing session.
    */
+  /**
+   * True only inside an iframe on a trusted page (the portfolio). Standalone
+   * DocMind stays a generic document assistant with no personal branding.
+   */
+  const [embeddedByTrusted, setEmbeddedByTrusted] = useState(false);
+  useEffect(() => {
+    setEmbeddedByTrusted(window.parent !== window && trustedOrigins.includes(embedOrigin()));
+  }, [trustedOrigins]);
+
   // submit changes with every keystroke (it closes over `input`); read it
   // through a ref so typing does not re-run the handshake below.
   const submitRef = useRef(submit);
@@ -365,6 +374,7 @@ export function ChatApp({
           region={docs.region}
           documentsLoaded={docs.loaded}
           onPickPrompt={(prompt) => submit(prompt)}
+          assistantAvatar={embeddedByTrusted ? '/kannan_avatar.jpg' : undefined}
         />
         )}
 

@@ -15,6 +15,7 @@ export function ChatView({
   region,
   documentsLoaded,
   onPickPrompt,
+  assistantAvatar,
 }: {
   messages: ChatMessage[];
   isStreaming: boolean;
@@ -24,6 +25,7 @@ export function ChatView({
   /** False until the document list has arrived from the server. */
   documentsLoaded: boolean;
   onPickPrompt: (prompt: string) => void;
+  assistantAvatar?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Auto-scroll only while the reader is already at the bottom; scrolling up to
@@ -80,6 +82,7 @@ export function ChatView({
               message={message}
               isLast={index === messages.length - 1}
               isStreaming={isStreaming}
+              assistantAvatar={assistantAvatar}
             />
           ))}
         </div>
