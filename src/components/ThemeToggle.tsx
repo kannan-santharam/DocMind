@@ -1,10 +1,19 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 
 export function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
+  // Hidden when the embedding page pins the theme with ?theme=, so the chat
+  // cannot drift away from the site around it.
+  const [pinned, setPinned] = useState(false);
+  useEffect(() => {
+    setPinned(new URLSearchParams(window.location.search).has('theme'));
+  }, []);
+
+  if (pinned) return null;
 
   return (
     <button

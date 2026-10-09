@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, Menu, Trash2 } from 'lucide-react';
 import { ApiKeyPanel } from '@/components/ApiKeyPanel';
 import { ChatView } from '@/components/ChatView';
@@ -13,6 +13,7 @@ import { useDocuments } from '@/hooks/useDocuments';
 import {
   clearStoredApiKey,
   deleteDocument,
+  embedOrigin,
   getSessionId,
   getStoredApiKey,
   resetSessionId,
@@ -33,7 +34,16 @@ interface SetupStatus {
 
 const SETTINGS_KEY = 'docmind-settings';
 
-export function ChatApp({ tracing }: { tracing: boolean }) {
+/** Longest question a parent page may hand in; room for a pasted job description. */
+const MAX_PARENT_PROMPT = 12000;
+
+export function ChatApp({
+  tracing,
+  trustedOrigins,
+}: {
+  tracing: boolean;
+  trustedOrigins: string[];
+}) {
   const [sessionId, setSessionId] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [input, setInput] = useState('');
@@ -112,6 +122,46 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
     },
     [chat, input],
   );
+
+  /**
+   * Parent handoff. The portfolio home page shows its own intro and composer,
+   * then opens this app in an iframe and posts the visitor's first question
+   * here, so they do not have to type it twice. Only the framing page may post,
+   * and only from an origin on the trusted list (the same list that is allowed
+   * to frame the app at all). Once a session id exists we tell the parent we
+   * are ready; asking earlier would fail with a 400 for the missing session.
+   */
+  /**
+   * True only inside an iframe on a trusted page (the portfolio). Standalone
+   * DocMind stays a generic document assistant with no personal branding.
+   */
+  const [embeddedByTrusted, setEmbeddedByTrusted] = useState(false);
+  useEffect(() => {
+    setEmbeddedByTrusted(window.parent !== window && trustedOrigins.includes(embedOrigin()));
+  }, [trustedOrigins]);
+
+  // submit changes with every keystroke (it closes over `input`); read it
+  // through a ref so typing does not re-run the handshake below.
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+
+  useEffect(() => {
+    if (!sessionId || window.parent === window) return;
+    const parentOrigin = embedOrigin();
+    if (!trustedOrigins.includes(parentOrigin)) return;
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== window.parent || event.origin !== parentOrigin) return;
+      const data = event.data as { type?: unknown; prompt?: unknown } | null;
+      if (data?.type !== 'docmind:ask' || typeof data.prompt !== 'string') return;
+      const prompt = data.prompt.trim().slice(0, MAX_PARENT_PROMPT);
+      if (prompt) submitRef.current(prompt);
+    };
+
+    window.addEventListener('message', onMessage);
+    window.parent.postMessage({ type: 'docmind:ready' }, parentOrigin);
+    return () => window.removeEventListener('message', onMessage);
+  }, [sessionId, trustedOrigins]);
 
   const startNewSession = useCallback(async () => {
     setConfirmNewSession(false);
@@ -324,6 +374,7 @@ export function ChatApp({ tracing }: { tracing: boolean }) {
           region={docs.region}
           documentsLoaded={docs.loaded}
           onPickPrompt={(prompt) => submit(prompt)}
+          assistantAvatar={embeddedByTrusted ? '/kannan_avatar.jpg' : undefined}
         />
         )}
 

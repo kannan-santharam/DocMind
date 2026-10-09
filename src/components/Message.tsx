@@ -34,10 +34,13 @@ export function Message({
   message,
   isLast,
   isStreaming,
+  assistantAvatar,
 }: {
   message: ChatMessage;
   isLast: boolean;
   isStreaming: boolean;
+  /** Photo for the assistant, set only when a trusted page embeds DocMind. */
+  assistantAvatar?: string;
 }) {
   const [highlighted, setHighlighted] = useState<number | null>(null);
   const streamingThis = isLast && isStreaming;
@@ -67,10 +70,18 @@ export function Message({
 
   return (
     <div className="animate-fade-in group flex gap-3">
-      <div className="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg">
-        <span className="tech-gradient-bg absolute inset-0" />
-        <Sparkles className="relative h-3.5 w-3.5 text-white" />
-      </div>
+      {assistantAvatar ? (
+        // The embedding page's persona photo, so answers read as coming from it.
+        <div className="tech-gradient-bg mt-0.5 h-7 w-7 shrink-0 rounded-full p-[1.5px]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={assistantAvatar} alt="" className="h-full w-full rounded-full object-cover" />
+        </div>
+      ) : (
+        <div className="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg">
+          <span className="tech-gradient-bg absolute inset-0" />
+          <Sparkles className="relative h-3.5 w-3.5 text-white" />
+        </div>
+      )}
 
       <div className="min-w-0 flex-1">
         {message.trace && message.trace.length > 0 && (

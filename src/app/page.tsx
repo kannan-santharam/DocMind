@@ -11,5 +11,17 @@ import { isTracingEnabled } from '@/lib/tracing';
  * the wrong dependency for that particular piece of text.
  */
 export default function Page() {
-  return <ChatApp tracing={isTracingEnabled()} />;
+  return <ChatApp tracing={isTracingEnabled()} trustedOrigins={trustedOrigins()} />;
+}
+
+/**
+ * The same TRUSTED_ORIGINS list next.config.ts uses for frame-ancestors. Read
+ * here on the server and handed down, so the client can check who is posting a
+ * question into the iframe without the list becoming a NEXT_PUBLIC_ variable.
+ */
+function trustedOrigins(): string[] {
+  return (process.env.TRUSTED_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 }
