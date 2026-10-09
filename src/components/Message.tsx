@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { TriangleAlert, Check, Copy, Sparkles } from 'lucide-react';
+import { TriangleAlert, Check, Copy } from 'lucide-react';
 import { AgentTrace } from './AgentTrace';
 import { Markdown } from './Markdown';
 import { Sources } from './Sources';
@@ -67,9 +67,11 @@ export function Message({
 
   return (
     <div className="animate-fade-in group flex gap-3">
-      <div className="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg">
-        <span className="tech-gradient-bg absolute inset-0" />
-        <Sparkles className="relative h-3.5 w-3.5 text-white" />
+      {/* Kannan's photo as the assistant avatar: the answers are about him, and
+          the portfolio home page introduces the chat in his voice. */}
+      <div className="tech-gradient-bg mt-0.5 h-7 w-7 shrink-0 rounded-full p-[1.5px]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/kannan_avatar.jpg" alt="" className="h-full w-full rounded-full object-cover" />
       </div>
 
       <div className="min-w-0 flex-1">

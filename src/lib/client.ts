@@ -33,7 +33,7 @@ export function resetSessionId(): string {
  * embedded in an iframe, its own otherwise. The server matches it against an
  * allowlist to decide whether contact details may be shared.
  */
-function embedOrigin(): string {
+export function embedOrigin(): string {
   if (typeof window === 'undefined') return '';
   try {
     const ancestors = window.location.ancestorOrigins;

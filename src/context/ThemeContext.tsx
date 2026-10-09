@@ -20,8 +20,13 @@ export const THEME_STORAGE_KEY = 'docmind-theme';
 export const themeBootstrapScript = `
 (function () {
   try {
+    // An embedding page can pin the theme with ?theme=dark|light, so DocMind
+    // matches the site around it. A pinned theme is not saved.
+    var forced = new URLSearchParams(window.location.search).get('theme');
     var saved = localStorage.getItem('${THEME_STORAGE_KEY}');
-    var theme = saved === 'light' || saved === 'dark'
+    var theme = forced === 'light' || forced === 'dark'
+      ? forced
+      : saved === 'light' || saved === 'dark'
       ? saved
       : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
     document.documentElement.classList.add(theme);
